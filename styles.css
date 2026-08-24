@@ -362,4 +362,66 @@ label {
 .amount.expense { color: var(--expense); }
 .amount.income { color: var(--income); }
 
+.form-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.section-title {
+  margin: 18px 2px 8px;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.icon-btn {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: var(--chip);
+  color: var(--navy);
+  display: grid;
+  place-items: center;
+  border: 0;
+  cursor: pointer;
+}
+
+.bar-list { display: grid; gap: 10px; }
+.bar-row {
+  display: grid;
+  grid-template-columns: 1fr 2fr auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+}
+.bar-track {
+  height: 8px;
+  background: var(--chip);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.bar-track i {
+  display: block;
+  height: 100%;
+  background: var(--navy);
+}
+.bar-track.expense i { background: var(--expense); }
+.bar-track.income i { background: var(--income); }
+
+.footer-links {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 8px 0 18px;
+}
+
+.theme-row {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0 14px;
+}
+
 .hidden { display: none !important; }

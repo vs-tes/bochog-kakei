@@ -17,6 +17,12 @@ import {
 import { downloadFile, printReport, toCsv, toExcelXml } from "./export.js";
 
 const app = document.getElementById("app");
+const TX_TYPES = [
+  { id: "payment", label: "Payment", sign: "−" },
+  { id: "deposit", label: "Deposit", sign: "+" },
+  { id: "adjust", label: "Adjustment", sign: "+" },
+  { id: "transfer", label: "Transfer", sign: "−" },
+];
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -78,15 +84,17 @@ function go(hash) {
 function parseRoute() {
   const parts = (location.hash.replace(/^#/, "") || "/").split("/").filter(Boolean);
   if (!parts.length) return { name: "accounts" };
-  const [a, b] = parts;
+  const [a, b, c, d] = parts;
   if (a === "account" && b === "new") return { name: "account-form", id: null };
-  if (a === "account" && b) return { name: "account-form", id: b };
-  if (a === "activity" && b === "new") return { name: "tx-form", id: null };
-  if (a === "activity" && b) return { name: "tx-form", id: b };
+  if (a === "account" && b && c === "edit") return { name: "account-form", id: b };
+  if (a === "account" && b && c === "tx" && (d === "new" || !d)) return { name: "tx-form", id: null, accountId: b };
+  if (a === "account" && b && c === "tx" && d) return { name: "tx-form", id: d, accountId: b };
+  if (a === "account" && b) return { name: "account", id: b };
+  if (a === "activity" && b === "new") return { name: "tx-form", id: null, accountId: null };
+  if (a === "activity" && b) return { name: "tx-form", id: b, accountId: null };
   if (a === "activity") return { name: "activity" };
   if (a === "report") return { name: "report" };
   if (a === "settings") return { name: "settings" };
-  if (a === "assets" || a === "budget" || a === "goals" || a === "reports") return { name: "accounts" };
   return { name: "accounts" };
 }
 
@@ -120,11 +128,15 @@ function normalizeCategory(id) {
     {
       "bank-accounts": "bank",
       "credit-cards": "credit-card",
+      bill: "utilities",
+      "bill-due": "utilities",
       investment: "investments",
-      vehicle: "vehicles",
-      vehicles: "vehicles",
-      realestate: "real-estate",
-      "personal-assets": "personal",
+      vehicle: "custom",
+      vehicles: "custom",
+      "real-estate": "custom",
+      realestate: "custom",
+      personal: "custom",
+      "personal-assets": "custom",
       "custom-assets": "custom",
     }[id] || id
   );
@@ -132,7 +144,14 @@ function normalizeCategory(id) {
 
 function catMeta(id) {
   const key = normalizeCategory(id);
-  return settings.assetCategories.find((item) => item.id === key) || { id: key, label: id, liability: false, group: "other" };
+  return (
+    settings.assetCategories.find((item) => item.id === key) || {
+      id: key,
+      label: id,
+      liability: false,
+      group: "other",
+    }
+  );
 }
 
 function categoryLabel(kind, id) {
@@ -145,24 +164,30 @@ function categoryLabel(kind, id) {
   return list.find((item) => item.id === id)?.label || id || "—";
 }
 
+function typeLabel(asset) {
+  const cat = catMeta(asset.category);
+  return asset.category === "custom" && asset.customType ? asset.customType : cat.label;
+}
+
 function isLiability(asset) {
   const cat = catMeta(asset?.category);
   return Boolean(asset?.liability || cat.liability || cat.group === "out");
 }
 
 function isDueType(type) {
-  return type === "bill" || type === "insurance";
+  return ["utilities", "insurance", "loan", "tithes"].includes(normalizeCategory(type));
 }
 
 function isAmountDueType(type) {
-  return type === "credit-card" || type === "bill" || type === "insurance";
+  return ["credit-card", "utilities", "insurance", "loan", "tithes"].includes(normalizeCategory(type));
 }
 
 function groupOf(asset) {
   const cat = catMeta(asset.category);
-  if (cat.group === "in" || cat.group === "out") return cat.group;
-  if (["cash", "bank", "savings"].includes(asset.category)) return "in";
-  if (["credit-card", "bill", "insurance"].includes(asset.category) || isLiability(asset)) return "out";
+  if (cat.group === "in" || cat.group === "out" || cat.group === "other") return cat.group;
+  const id = normalizeCategory(asset.category);
+  if (["cash", "bank", "savings"].includes(id)) return "in";
+  if (["credit-card", "utilities", "insurance", "loan", "tithes"].includes(id) || isLiability(asset)) return "out";
   return "other";
 }
 
@@ -171,6 +196,14 @@ function txKind(row) {
   if (row.type === "expense" || row.type === "payment") return "payment";
   if (row.type === "adjust" || row.type === "transfer") return row.type;
   return "payment";
+}
+
+function txMeta(kind) {
+  return TX_TYPES.find((item) => item.id === kind) || TX_TYPES[0];
+}
+
+function isDeduction(kind) {
+  return kind === "payment" || kind === "transfer";
 }
 
 async function reload() {
@@ -187,8 +220,9 @@ function moneyNow() {
   for (const row of cache.assets) {
     const value = toDefault(row.value, row.currency);
     const group = groupOf(row);
+    const id = normalizeCategory(row.category);
     if (group === "in") inBanks += value;
-    else if (normalizeCategory(row.category) === "credit-card") cards += value;
+    else if (id === "credit-card") cards += value;
     else if (group === "out") bills += value;
   }
   const comingOut = cards + bills;
@@ -199,14 +233,20 @@ function monthTxs(month = ui.month) {
   return cache.txs.filter((row) => (row.date || "").startsWith(month));
 }
 
+function accountTxs(accountId) {
+  return cache.txs
+    .filter((row) => row.assetId === accountId || row.toAssetId === accountId)
+    .sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.createdAt || "").localeCompare(a.createdAt || ""));
+}
+
 function flowFor(rows) {
   let income = 0;
   let expense = 0;
   for (const row of rows) {
     const kind = txKind(row);
     const value = toDefault(row.amount, row.currency);
-    if (kind === "deposit") income += value;
-    if (kind === "payment") expense += value;
+    if (kind === "deposit" || kind === "adjust") income += value;
+    if (kind === "payment" || kind === "transfer") expense += value;
   }
   return { income, expense, left: income - expense };
 }
@@ -264,16 +304,38 @@ function barChart(items, kind) {
     .join("")}</div>`;
 }
 
+function txCard(row, accountId) {
+  const kind = txKind(row);
+  const meta = txMeta(kind);
+  const from = cache.assets.find((item) => item.id === row.assetId);
+  const to = cache.assets.find((item) => item.id === row.toAssetId);
+  const outgoing = kind === "transfer" ? row.assetId === accountId : isDeduction(kind);
+  const cls = outgoing ? "out" : "in";
+  const sign = outgoing ? "−" : "+";
+  const href = accountId ? `#/account/${accountId}/tx/${row.id}` : `#/activity/${row.id}`;
+  const where =
+    kind === "transfer"
+      ? `${from?.name || "Account"} → ${to?.name || "Account"}`
+      : from?.name || categoryLabel(kind === "deposit" ? "income" : "expense", row.category);
+  return `<article class="card">
+    <a class="card-main" href="${href}">
+      <div class="meta">
+        <h3>${escapeHtml(row.name || meta.label)}</h3>
+        <p class="when">${prettyDate(row.date)} · ${escapeHtml(meta.label)} · ${escapeHtml(where)}</p>
+      </div>
+      <strong class="amount ${cls}">${sign}${formatMoney(row.amount, row.currency)}</strong>
+    </a>
+  </article>`;
+}
+
 function accountCard(row) {
-  const cat = catMeta(row.category);
-  const typeLabel = row.category === "custom" && row.customType ? row.customType : cat.label;
   const due = row.dueDate ? ` · due ${prettyDate(row.dueDate)}` : "";
   const cls = groupOf(row) === "out" ? "out" : groupOf(row) === "in" ? "in" : "";
   return `<article class="card">
     <a class="card-main" href="#/account/${row.id}">
       <div class="meta">
         <h3>${escapeHtml(row.name)}</h3>
-        <p class="when">${escapeHtml(typeLabel)}${due}</p>
+        <p class="when">${escapeHtml(typeLabel(row))}${due}</p>
       </div>
       <strong class="amount ${cls}">${formatMoney(row.value, row.currency)}</strong>
     </a>
@@ -286,18 +348,20 @@ function sectionList(title, rows) {
     <div class="list">${rows.map(accountCard).join("")}</div>`;
 }
 
+function byName(a, b) {
+  return (a.name || "").localeCompare(b.name || "");
+}
+
+function byDue(a, b) {
+  return (a.dueDate || "9999").localeCompare(b.dueDate || "9999") || byName(a, b);
+}
+
+function byType(id) {
+  return cache.assets.filter((row) => normalizeCategory(row.category) === id);
+}
+
 async function renderAccounts() {
   const now = moneyNow();
-  const cash = cache.assets.filter((row) => groupOf(row) === "in").sort(byName);
-  const cards = cache.assets.filter((row) => normalizeCategory(row.category) === "credit-card").sort(byName);
-  const insurance = cache.assets.filter((row) => normalizeCategory(row.category) === "insurance").sort(byDue);
-  const bills = cache.assets
-    .filter((row) => {
-      const id = normalizeCategory(row.category);
-      return id === "bill" || (groupOf(row) === "out" && id !== "credit-card" && id !== "insurance");
-    })
-    .sort(byDue);
-  const other = cache.assets.filter((row) => groupOf(row) === "other").sort(byName);
   app.innerHTML = `
     <header class="top">
       <div class="brand">
@@ -322,18 +386,20 @@ async function renderAccounts() {
           <strong class="amount out">${formatMoney(now.comingOut)}</strong>
         </div>
       </div>
-      <p class="hint" style="margin-top:12px">Cash and bank balances minus credit cards, utilities, insurance, and other bills due.</p>
+      <p class="hint" style="margin-top:12px">Cash, bank, and savings minus credit cards, loans, utilities, insurance, and tithes.</p>
     </section>
     ${
       cache.assets.length
-        ? `${sectionList("Cash & banks", cash)}
-           ${sectionList("Credit cards", cards)}
-           ${sectionList("Insurance", insurance)}
-           ${sectionList("Bills due", bills)}
-           ${sectionList("Other assets", other)}`
+        ? `${sectionList("Cash & banks", cache.assets.filter((row) => groupOf(row) === "in").sort(byName))}
+           ${sectionList("Credit cards", byType("credit-card").sort(byName))}
+           ${sectionList("Loans", byType("loan").sort(byName))}
+           ${sectionList("Insurance", byType("insurance").sort(byDue))}
+           ${sectionList("Utilities", byType("utilities").sort(byDue))}
+           ${sectionList("Tithes", byType("tithes").sort(byDue))}
+           ${sectionList("Other assets", cache.assets.filter((row) => groupOf(row) === "other").sort(byName))}`
         : `<div class="empty">
             <h2>Start with balances</h2>
-            <p>Add each bank or cash account, then add credit cards and bills (utilities, insurance). Current savings is banks minus those upcoming expenses.</p>
+            <p>Add cash and bank accounts, then add credit cards, loans, utilities, insurance, and tithes. Current savings is banks minus those amounts due.</p>
             <button class="primary" data-go="#/account/new">Add an account</button>
           </div>`
     }
@@ -341,37 +407,64 @@ async function renderAccounts() {
   `;
 }
 
-function byName(a, b) {
-  return (a.name || "").localeCompare(b.name || "");
-}
-
-function byDue(a, b) {
-  return (a.dueDate || "9999").localeCompare(b.dueDate || "9999") || byName(a, b);
+async function renderAccount(id) {
+  const row = await getAsset(id);
+  if (!row) {
+    go("#/");
+    return;
+  }
+  const rows = accountTxs(id);
+  const cls = groupOf(row) === "out" ? "out" : "in";
+  app.innerHTML = `
+    <div class="form-top">
+      <button class="ghost" data-go="#/">Back</button>
+      <button class="ghost" data-go="#/account/${row.id}/edit">Edit</button>
+    </div>
+    <section class="hero">
+      <p class="eyebrow">${escapeHtml(typeLabel(row))}</p>
+      <h1>${escapeHtml(row.name)}</h1>
+      <p class="hero-amount ${cls === "out" ? "amount out" : ""}">${formatMoney(row.value, row.currency)}</p>
+      ${row.dueDate ? `<p class="hint">Due ${prettyDate(row.dueDate)}</p>` : ""}
+    </section>
+    <header class="top">
+      <h2 class="section-title" style="margin:0">Transactions</h2>
+      <button class="primary" data-go="#/account/${row.id}/tx/new">Add</button>
+    </header>
+    ${
+      rows.length
+        ? `<div class="list">${rows.map((item) => txCard(item, id)).join("")}</div>`
+        : `<div class="empty">
+            <h2>No transactions yet</h2>
+            <p>Add a payment or transfer to subtract, or a deposit or adjustment to add.</p>
+          </div>`
+    }
+    ${tabbar("accounts")}
+  `;
 }
 
 async function renderAccountForm(id) {
   const row = id ? await getAsset(id) : null;
   const selectedType = normalizeCategory(row?.category || "bank");
+  const back = id ? `#/account/${id}` : "#/";
   app.innerHTML = `
     <div class="form-top">
-      <button class="ghost" data-go="#/">Back</button>
+      <button class="ghost" data-go="${back}">Back</button>
       ${id ? `<button class="danger compact" id="deleteAccount" type="button">Delete</button>` : ""}
     </div>
-    <h1>${id ? "Account" : "New account"}</h1>
+    <h1>${id ? "Edit account" : "New account"}</h1>
     <form class="form" id="accountForm">
       <label>Name
         <input name="name" required value="${escapeAttr(row?.name || "")}" placeholder="MUFG, cash wallet, Tokyo Gas…" />
       </label>
       <label>Type
-        <input type="hidden" name="category" id="accountType" value="${escapeAttr(selectedType)}" />
-        <div class="type-grid">
+        <select name="category" id="accountType">
           ${settings.assetCategories
             .map(
               (cat) =>
-                `<button type="button" class="chip ${selectedType === cat.id ? "active" : ""}" data-account-type="${cat.id}">${escapeHtml(cat.label)}</button>`
+                `<option value="${cat.id}" ${selectedType === cat.id ? "selected" : ""}>${escapeHtml(cat.label)}</option>`
             )
             .join("")}
-        </div>
+        </select>
       </label>
       <label>Currency
         <select name="currency">
@@ -400,12 +493,12 @@ async function renderActivity() {
   const q = ui.txQuery.trim().toLowerCase();
   const rows = monthTxs()
     .filter((row) => ui.txType === "all" || txKind(row) === ui.txType)
-    .filter((row) => !q || [row.name, row.notes, categoryLabel(txKind(row) === "deposit" ? "income" : "expense", row.category)].join(" ").toLowerCase().includes(q))
+    .filter((row) => !q || [row.name, row.notes, txMeta(txKind(row)).label].join(" ").toLowerCase().includes(q))
     .sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.createdAt || "").localeCompare(a.createdAt || ""));
   app.innerHTML = `
     <header class="top">
       <div>
-        <p class="eyebrow">Transactions</p>
+        <p class="eyebrow">All accounts</p>
         <h1>Activity</h1>
       </div>
       <button class="primary" data-go="#/activity/new">Add</button>
@@ -413,43 +506,17 @@ async function renderActivity() {
     ${monthNav()}
     <input class="search" id="txSearch" type="search" placeholder="Search" value="${escapeAttr(ui.txQuery)}" />
     <div class="filters">
-      ${["all", "payment", "deposit", "transfer", "adjust"]
-        .map((key) => `<button class="chip ${ui.txType === key ? "active" : ""}" data-tx-type="${key}">${key === "all" ? "All" : key[0].toUpperCase() + key.slice(1)}</button>`)
+      ${["all", "payment", "deposit", "adjust", "transfer"]
+        .map((key) => `<button class="chip ${ui.txType === key ? "active" : ""}" data-tx-type="${key}">${key === "all" ? "All" : txMeta(key).label}</button>`)
         .join("")}
     </div>
     ${
       rows.length
-        ? `<div class="list">${rows
-            .map((row) => {
-              const kind = txKind(row);
-              const asset = cache.assets.find((item) => item.id === row.assetId);
-              const to = cache.assets.find((item) => item.id === row.toAssetId);
-              const sign = kind === "deposit" ? "+" : kind === "payment" ? "−" : kind === "adjust" ? "=" : "→";
-              const cls = kind === "deposit" ? "in" : kind === "payment" ? "out" : "";
-              const where = kind === "transfer"
-                ? `${asset?.name || "Account"} → ${to?.name || "Account"}`
-                : asset?.name || categoryLabel(kind === "deposit" ? "income" : "expense", row.category);
-              return `<article class="card">
-                <a class="card-main" href="#/activity/${row.id}">
-                  <div class="meta">
-                    <h3>${escapeHtml(row.name || kind)}</h3>
-                    <p class="when">${prettyDate(row.date)} · ${escapeHtml(where)}</p>
-                  </div>
-                  <strong class="amount ${cls}">${sign}${formatMoney(row.amount, row.currency)}</strong>
-                </a>
-              </article>`;
-            })
-            .join("")}</div>`
-        : `<div class="empty"><h2>No activity this month</h2><p>Add a payment, deposit, or transfer. Account balances update when you save.</p></div>`
+        ? `<div class="list">${rows.map((row) => txCard(row)).join("")}</div>`
+        : `<div class="empty"><h2>No activity this month</h2><p>Open an account and add a payment, deposit, adjustment, or transfer.</p></div>`
     }
     ${tabbar("activity")}
   `;
-}
-
-function txTypeOptions(current) {
-  return ["payment", "deposit", "transfer", "adjust"]
-    .map((key) => `<button type="button" class="chip ${current === key ? "active" : ""}" data-pick-type="${key}">${key[0].toUpperCase() + key.slice(1)}</button>`)
-    .join("");
 }
 
 function accountOptions(selected, extra = "") {
@@ -458,18 +525,25 @@ function accountOptions(selected, extra = "") {
     .join("")}`;
 }
 
-async function renderTxForm(id) {
+async function renderTxForm(id, accountId) {
   const row = id ? await getTransaction(id) : null;
   const kind = row ? txKind(row) : "payment";
-  const cats = kind === "deposit" ? settings.incomeCategories : settings.expenseCategories;
+  const lockedAccount = accountId || row?.assetId || "";
+  const back = accountId ? `#/account/${accountId}` : "#/activity";
+  const cats = kind === "deposit" || kind === "adjust" ? settings.incomeCategories : settings.expenseCategories;
   app.innerHTML = `
     <div class="form-top">
-      <button class="ghost" data-go="#/activity">Back</button>
+      <button class="ghost" data-go="${back}">Back</button>
       ${id ? `<button class="danger compact" id="deleteTx" type="button">Delete</button>` : ""}
     </div>
     <h1>${id ? "Transaction" : "New transaction"}</h1>
-    <form class="form" id="txForm" data-kind="${kind}">
-      <div class="type-toggle">${txTypeOptions(kind)}</div>
+    <form class="form" id="txForm" data-kind="${kind}" data-account-id="${escapeAttr(accountId || "")}">
+      <label>Type
+        <select name="type" id="txType">
+          ${TX_TYPES.map((item) => `<option value="${item.id}" ${kind === item.id ? "selected" : ""}>${item.label}</option>`).join("")}
+        </select>
+      </label>
+      <p class="hint" id="txHint">${isDeduction(kind) ? "This subtracts from the account." : "This adds to the account."}</p>
       <label>Date
         <input name="date" type="date" required value="${escapeAttr(row?.date || today())}" />
       </label>
@@ -485,14 +559,14 @@ async function renderTxForm(id) {
             ${CURRENCIES.map((c) => `<option ${ (row?.currency || settings.defaultCurrency) === c ? "selected" : "" }>${c}</option>`).join("")}
           </select>
         </label>
-        <label id="categoryField" class="${kind === "transfer" || kind === "adjust" ? "hidden" : ""}">Category
+        <label id="categoryField" class="${kind === "transfer" ? "hidden" : ""}">Category
           <select name="category">
             ${cats.map((cat) => `<option value="${cat.id}" ${row?.category === cat.id ? "selected" : ""}>${escapeHtml(cat.label)}</option>`).join("")}
           </select>
         </label>
       </div>
       <label id="assetField">${kind === "transfer" ? "From" : "Account"}
-        <select name="assetId" required>${accountOptions(row?.assetId)}</select>
+        <select name="assetId" required>${accountOptions(row?.assetId || lockedAccount)}</select>
       </label>
       <label id="toField" class="${kind === "transfer" ? "" : "hidden"}">To
         <select name="toAssetId">${accountOptions(row?.toAssetId, "Select account")}</select>
@@ -500,10 +574,9 @@ async function renderTxForm(id) {
       <label>Notes
         <textarea name="notes">${escapeHtml(row?.notes || "")}</textarea>
       </label>
-      <p class="hint">Payment, deposit, and transfer update the account balances. Adjustment sets the account to this amount.</p>
       <button class="primary" type="submit">Save</button>
     </form>
-    ${tabbar("activity")}
+    ${tabbar(accountId ? "accounts" : "activity")}
   `;
 }
 
@@ -523,18 +596,18 @@ async function renderReport() {
     <section class="hero">
       <div class="hero-split">
         <div>
-          <span>Income</span>
+          <span>Added</span>
           <strong class="amount in">${formatMoney(flow.income)}</strong>
         </div>
         <div>
-          <span>Expenses</span>
+          <span>Subtracted</span>
           <strong class="amount out">${formatMoney(flow.expense)}</strong>
         </div>
       </div>
     </section>
     <div class="filters">
-      <button class="chip ${kind === "expense" ? "active" : ""}" data-report-kind="expense">Expenses</button>
-      <button class="chip ${kind === "income" ? "active" : ""}" data-report-kind="income">Income</button>
+      <button class="chip ${kind === "expense" ? "active" : ""}" data-report-kind="expense">Payments</button>
+      <button class="chip ${kind === "income" ? "active" : ""}" data-report-kind="income">Deposits</button>
     </div>
     ${barChart(items, kind)}
     <div class="footer-links">
@@ -569,6 +642,12 @@ async function renderSettings() {
         <h1>Settings</h1>
       </div>
     </header>
+    <h2 class="section-title">Backup</h2>
+    <p class="hint">Data stays on this device. Export a copy before clearing the browser.</p>
+    <div class="footer-links">
+      <button class="ghost" id="backupBtn" type="button">Export backup</button>
+      <label class="file-btn ghost">Import backup<input id="importFile" type="file" accept="application/json" /></label>
+    </div>
     <h2 class="section-title">Appearance</h2>
     <div class="theme-row">
       <button class="chip ${settings.theme === "light" ? "active" : ""}" data-theme-pick="light">Light</button>
@@ -592,12 +671,6 @@ async function renderSettings() {
     ${catEditor("expenseCategories")}
     <h2 class="section-title">Income categories</h2>
     ${catEditor("incomeCategories")}
-    <h2 class="section-title">Backup</h2>
-    <p class="hint">Data stays on this device. Export a copy before clearing the browser.</p>
-    <div class="footer-links">
-      <button class="ghost" id="backupBtn" type="button">Export backup</button>
-      <label class="file-btn ghost">Import backup<input id="importFile" type="file" accept="application/json" /></label>
-    </div>
     ${tabbar("settings")}
   `;
 }
@@ -633,28 +706,21 @@ async function applyChanges(changes) {
   }
 }
 
-function deltaFor(asset, kind, amount) {
-  if (!asset) return 0;
-  if (kind === "payment") return isLiability(asset) ? amount : -amount;
-  if (kind === "deposit") return isLiability(asset) ? -amount : amount;
-  return 0;
-}
-
 async function computeEffect(kind, data, amount) {
   const assets = await listAssets();
   const from = assets.find((row) => row.id === data.assetId);
   const to = assets.find((row) => row.id === data.toAssetId);
-  if (kind === "adjust" && from) {
-    return [{ id: from.id, delta: amount - (Number(from.value) || 0) }];
+  if ((kind === "deposit" || kind === "adjust") && from) {
+    return [{ id: from.id, delta: amount }];
+  }
+  if (kind === "payment" && from) {
+    return [{ id: from.id, delta: -amount }];
   }
   if (kind === "transfer" && from && to) {
     return [
-      { id: from.id, delta: deltaFor(from, "payment", amount) },
-      { id: to.id, delta: deltaFor(to, "deposit", amount) },
+      { id: from.id, delta: -amount },
+      { id: to.id, delta: amount },
     ];
-  }
-  if ((kind === "payment" || kind === "deposit") && from) {
-    return [{ id: from.id, delta: deltaFor(from, kind, amount) }];
   }
   return [];
 }
@@ -673,16 +739,15 @@ function setTxType(kind) {
   const form = app.querySelector("#txForm");
   if (!form) return;
   form.dataset.kind = kind;
-  for (const chip of form.querySelectorAll("[data-pick-type]")) {
-    chip.classList.toggle("active", chip.dataset.pickType === kind);
-  }
-  form.querySelector("#categoryField")?.classList.toggle("hidden", kind === "transfer" || kind === "adjust");
+  const hint = app.querySelector("#txHint");
+  if (hint) hint.textContent = isDeduction(kind) ? "This subtracts from the account." : "This adds to the account.";
+  form.querySelector("#categoryField")?.classList.toggle("hidden", kind === "transfer");
   form.querySelector("#toField")?.classList.toggle("hidden", kind !== "transfer");
   const assetLabel = form.querySelector("#assetField");
   if (assetLabel) assetLabel.childNodes[0].textContent = kind === "transfer" ? "From" : "Account";
   const select = form.querySelector("[name=category]");
-  if (select && kind !== "transfer" && kind !== "adjust") {
-    const cats = kind === "deposit" ? settings.incomeCategories : settings.expenseCategories;
+  if (select && kind !== "transfer") {
+    const cats = kind === "deposit" || kind === "adjust" ? settings.incomeCategories : settings.expenseCategories;
     select.innerHTML = cats.map((cat) => `<option value="${cat.id}">${escapeHtml(cat.label)}</option>`).join("");
   }
 }
@@ -699,9 +764,10 @@ function updateAccountTypeUi() {
 
 async function route() {
   const r = parseRoute();
+  if (r.name === "account") return renderAccount(r.id);
   if (r.name === "account-form") return renderAccountForm(r.id);
   if (r.name === "activity") return renderActivity();
-  if (r.name === "tx-form") return renderTxForm(r.id);
+  if (r.name === "tx-form") return renderTxForm(r.id, r.accountId);
   if (r.name === "report") return renderReport();
   if (r.name === "settings") return renderSettings();
   return renderAccounts();
@@ -729,23 +795,6 @@ app.addEventListener("click", async (e) => {
     applyTheme(theme);
     await persistSettings();
     renderSettings();
-    return;
-  }
-  const pickType = e.target.closest("[data-pick-type]")?.dataset.pickType;
-  if (pickType) {
-    e.preventDefault();
-    setTxType(pickType);
-    return;
-  }
-  const accountType = e.target.closest("[data-account-type]")?.dataset.accountType;
-  if (accountType) {
-    e.preventDefault();
-    const input = app.querySelector("#accountType");
-    if (input) input.value = accountType;
-    for (const chip of app.querySelectorAll("[data-account-type]")) {
-      chip.classList.toggle("active", chip.dataset.accountType === accountType);
-    }
-    updateAccountTypeUi();
     return;
   }
   const txType = e.target.closest("[data-tx-type]")?.dataset.txType;
@@ -787,11 +836,11 @@ app.addEventListener("click", async (e) => {
   }
   if (e.target.id === "deleteTx") {
     if (!confirm("Delete this transaction?")) return;
-    const id = parseRoute().id;
-    const row = await getTransaction(id);
+    const routeNow = parseRoute();
+    const row = await getTransaction(routeNow.id);
     if (row?.effect?.changes) await applyChanges(row.effect.changes.map((c) => ({ id: c.id, delta: -c.delta })));
-    await deleteTransaction(id);
-    await afterSave("#/activity");
+    await deleteTransaction(routeNow.id);
+    await afterSave(routeNow.accountId ? `#/account/${routeNow.accountId}` : "#/activity");
     return;
   }
   if (e.target.id === "backupBtn") {
@@ -817,6 +866,10 @@ app.addEventListener("click", async (e) => {
 app.addEventListener("change", async (e) => {
   if (e.target.id === "accountType") {
     updateAccountTypeUi();
+    return;
+  }
+  if (e.target.id === "txType") {
+    setTxType(e.target.value);
     return;
   }
   if (e.target.id === "defaultCurrency") {
@@ -862,8 +915,9 @@ app.addEventListener("submit", async (e) => {
     const data = formData(e.target);
     const existing = parseRoute().id ? await getAsset(parseRoute().id) : null;
     const cat = catMeta(data.category);
+    const id = existing?.id || uid();
     await saveAsset({
-      id: existing?.id || uid(),
+      id,
       name: data.name.trim(),
       category: normalizeCategory(data.category),
       value: Number(data.value) || 0,
@@ -875,12 +929,12 @@ app.addEventListener("submit", async (e) => {
       createdAt: existing?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
-    await afterSave("#/");
+    await afterSave(`#/account/${id}`);
     return;
   }
   if (e.target.id === "txForm") {
     const data = formData(e.target);
-    const kind = e.target.dataset.kind || "payment";
+    const kind = data.type || e.target.dataset.kind || "payment";
     const existing = parseRoute().id ? await getTransaction(parseRoute().id) : null;
     if (existing?.effect?.changes) {
       await applyChanges(existing.effect.changes.map((c) => ({ id: c.id, delta: -c.delta })));
@@ -907,7 +961,8 @@ app.addEventListener("submit", async (e) => {
       createdAt: existing?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
-    await afterSave("#/activity");
+    const accountId = e.target.dataset.accountId || data.assetId;
+    await afterSave(accountId ? `#/account/${accountId}` : "#/activity");
   }
 });
 

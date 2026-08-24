@@ -1,13 +1,13 @@
 {
-  "name": "Bochog Plant Care",
-  "short_name": "Bochog",
-  "description": "Private plant care and watering schedule",
+  "name": "Bochog Kakei",
+  "short_name": "Kakei",
+  "description": "Simple household money: bank balances minus cards and bills",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#eef3ea",
-  "theme_color": "#1f3d2c",
+  "background_color": "#e8eef6",
+  "theme_color": "#1e4d8c",
   "icons": [
     {
       "src": "icons/icon.svg",

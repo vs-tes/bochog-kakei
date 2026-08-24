@@ -1,54 +1,39 @@
-# Bochog Plant Care
+# Bochog Kakei
 
-A private plant care and watering schedule. It runs in the browser on your iPhone (and any computer). There is **no Apple fee** — this is a web app, not an App Store app.
+A simple household money app, inspired by **AssetFlow** (formerly CashFlow). It runs in the browser on iPhone, iPad, Android, Windows, macOS, and Linux. There is **no login** and **no Apple fee** — this is a web app, like [Bochog Plant Care](https://github.com/vs-tes/bochog-plant-care).
 
-## Source code
+**Current savings** = cash + bank + savings − credit cards − bills due (utilities, insurance, etc.).
 
-This app is built with **HTML, CSS, and JavaScript** (no extra framework). Archive or copy this folder:
+Money data stays **on this device** (IndexedDB). It is not uploaded to a server.
 
-`/Users/vonzki-macbook-air-m4/bochog-plant-care`
+## iPhone (same as Plant Care)
 
-Main files: `index.html`, `styles.css`, `app.js`, `db.js`.
+1. On your iPhone, open **Safari** (not Chrome).
+2. Go to **https://vs-tes.github.io/bochog-kakei/**
+3. Tap Share → **Add to Home Screen**
+4. Open **Kakei** from the new icon
 
-Plant data (photos, watering dates) is **not** in that folder. It lives in the browser (IndexedDB). Use **Settings → Export backup** to archive your plants.
+If you already added this URL when it still showed Plant Care, delete that Home Screen icon and add it again.
 
-## Features
+Data on the iPhone is separate from data on this Mac. Use **Settings → Export backup** if you want to copy it.
 
-- Name, photo, location (rooms in your home)
-- Light, watering, optional misting, fertilize, and repot
-- Last watered / next water, plus a care log
-- Status: healthy, due soon, water now, overdue
-- Grouped by room, search, clone, and water/mist several plants at once
-- Species presets when adding a plant
-- Notes
-- Add to iPhone Home Screen so it feels like a normal app
+## Use it
+
+1. **Accounts** — add each bank/cash balance, then credit cards and bills. The big number is current savings.
+2. **Activity** — payment, deposit, transfer, or balance adjustment.
+3. **Report** — this month’s income and expenses.
+4. **Settings** — currency, light/dark, backup.
+
+## GitHub Pages
+
+Hosted from branch `main` / root, same as Plant Care:
+
+https://vs-tes.github.io/bochog-kakei/
 
 ## Run locally
-
-From this folder:
 
 ```bash
 python3 -m http.server 8787 --bind 0.0.0.0
 ```
 
-Then open `http://localhost:8787` on this Mac.
-
-On your iPhone (same Wi-Fi): open `http://YOUR-MAC-IP:8787` in Safari.
-
-### Add to iPhone Home Screen
-
-1. Open the site in **Safari** (not Chrome).
-2. Tap Share → **Add to Home Screen**.
-3. Open Bochog from the new icon.
-
-Apple charges $99/year only to publish a native app on the App Store. Home Screen web apps do not need that.
-
-## Put it online later (still free)
-
-GitHub Pages or Cloudflare Pages can host this folder. Plants are still stored **on each phone**, not in the cloud — export a backup if you want a copy.
-
-## Later (not in this first version)
-
-- Push reminders
-- Sync between iPhone and Mac
-- QNAP hosting
+Open `http://localhost:8787` on this Mac.

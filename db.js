@@ -1,23 +1,49 @@
-const DB_NAME = "bochog-plant-care";
-const DB_VERSION = 3;
+const DB_NAME = "bochog-kakei";
+const DB_VERSION = 1;
+
+export const CURRENCIES = ["JPY", "PHP", "USD"];
+
+export const DEFAULT_SETTINGS = {
+  defaultCurrency: "JPY",
+  theme: "light",
+  rates: { JPY: 1, USD: 150, PHP: 2.65 },
+  incomeCategories: [
+    { id: "salary", label: "Salary" },
+    { id: "business", label: "Business" },
+    { id: "dividends", label: "Dividends" },
+    { id: "interest", label: "Interest" },
+    { id: "other-income", label: "Other Income" },
+  ],
+  expenseCategories: [
+    { id: "food", label: "Food" },
+    { id: "utilities", label: "Utilities" },
+    { id: "insurance", label: "Insurance" },
+    { id: "transportation", label: "Transportation" },
+    { id: "housing", label: "Housing" },
+    { id: "healthcare", label: "Healthcare" },
+    { id: "shopping", label: "Shopping" },
+    { id: "travel", label: "Travel" },
+    { id: "entertainment", label: "Entertainment" },
+    { id: "other-expense", label: "Other" },
+  ],
+  assetCategories: [
+    { id: "cash", label: "Cash", liability: false, group: "in" },
+    { id: "bank", label: "Bank", liability: false, group: "in" },
+    { id: "savings", label: "Savings", liability: false, group: "in" },
+    { id: "credit-card", label: "Credit card", liability: true, group: "out" },
+    { id: "bill", label: "Bill due", liability: true, group: "out" },
+  ],
+};
 
 function openDb() {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = () => {
       const db = request.result;
-      if (!db.objectStoreNames.contains("plants")) {
-        db.createObjectStore("plants", { keyPath: "id" });
-      }
-      if (!db.objectStoreNames.contains("photos")) {
-        db.createObjectStore("photos", { keyPath: "id" });
-      }
-      if (!db.objectStoreNames.contains("logs")) {
-        const logs = db.createObjectStore("logs", { keyPath: "id" });
-        logs.createIndex("plantId", "plantId", { unique: false });
-      }
-      if (!db.objectStoreNames.contains("settings")) {
-        db.createObjectStore("settings", { keyPath: "id" });
+      for (const name of ["assets", "transactions", "goals", "snapshots", "attachments", "settings"]) {
+        if (!db.objectStoreNames.contains(name)) {
+          db.createObjectStore(name, { keyPath: "id" });
+        }
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -25,217 +51,181 @@ function openDb() {
   });
 }
 
-export async function listPlants() {
-  const db = await openDb();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction("plants", "readonly");
-    const request = tx.objectStore("plants").getAll();
-    request.onsuccess = () => resolve(request.result || []);
-    request.onerror = () => reject(request.error);
+function all(store) {
+  return openDb().then(
+    (db) =>
+      new Promise((resolve, reject) => {
+        const tx = db.transaction(store, "readonly");
+        const request = tx.objectStore(store).getAll();
+        request.onsuccess = () => resolve(request.result || []);
+        request.onerror = () => reject(request.error);
+      })
+  );
+}
+
+function one(store, id) {
+  return openDb().then(
+    (db) =>
+      new Promise((resolve, reject) => {
+        const tx = db.transaction(store, "readonly");
+        const request = tx.objectStore(store).get(id);
+        request.onsuccess = () => resolve(request.result || null);
+        request.onerror = () => reject(request.error);
+      })
+  );
+}
+
+function put(store, row) {
+  return openDb().then(
+    (db) =>
+      new Promise((resolve, reject) => {
+        const tx = db.transaction(store, "readwrite");
+        tx.objectStore(store).put(row);
+        tx.oncomplete = () => resolve(row);
+        tx.onerror = () => reject(tx.error);
+      })
+  );
+}
+
+function remove(store, id) {
+  return openDb().then(
+    (db) =>
+      new Promise((resolve, reject) => {
+        const tx = db.transaction(store, "readwrite");
+        tx.objectStore(store).delete(id);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      })
+  );
+}
+
+export const listAssets = () => all("assets");
+export const getAsset = (id) => one("assets", id);
+export const saveAsset = (row) => put("assets", row);
+export async function deleteAsset(id) {
+  await remove("assets", id);
+  await remove("attachments", `asset:${id}`);
+}
+
+export const listTransactions = () => all("transactions");
+export const getTransaction = (id) => one("transactions", id);
+export const saveTransaction = (row) => put("transactions", row);
+export async function deleteTransaction(id) {
+  await remove("transactions", id);
+  await remove("attachments", `tx:${id}`);
+}
+
+export const listGoals = () => all("goals");
+export const saveGoal = (row) => put("goals", row);
+export const deleteGoal = (id) => remove("goals", id);
+
+export const listSnapshots = () => all("snapshots");
+export const saveSnapshot = (row) => put("snapshots", row);
+
+export async function saveAttachment(id, blob, name, mime) {
+  return put("attachments", { id, blob, name: name || "file", mime: mime || blob.type || "application/octet-stream" });
+}
+
+export async function getAttachment(id) {
+  return one("attachments", id);
+}
+
+export async function getAttachmentUrl(id) {
+  const row = await getAttachment(id);
+  return row?.blob ? URL.createObjectURL(row.blob) : null;
+}
+
+function mergeCategories(saved, defaults) {
+  const list = Array.isArray(saved) && saved.length ? [...saved] : [];
+  for (const item of defaults) {
+    if (!list.some((row) => row.id === item.id)) list.push(item);
+  }
+  return list.map((row) => {
+    const fallback = defaults.find((item) => item.id === row.id);
+    return fallback ? { ...fallback, ...row } : row;
   });
 }
 
-export async function getPlant(id) {
-  const db = await openDb();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction("plants", "readonly");
-    const request = tx.objectStore("plants").get(id);
-    request.onsuccess = () => resolve(request.result || null);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-export async function savePlant(plant) {
-  const db = await openDb();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction("plants", "readwrite");
-    tx.objectStore("plants").put(plant);
-    tx.oncomplete = () => resolve(plant);
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-export async function deletePlant(id) {
-  const db = await openDb();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(["plants", "photos", "logs"], "readwrite");
-    tx.objectStore("plants").delete(id);
-    tx.objectStore("photos").delete(id);
-    const index = tx.objectStore("logs").index("plantId");
-    const range = IDBKeyRange.only(id);
-    index.openCursor(range).onsuccess = (event) => {
-      const cursor = event.target.result;
-      if (cursor) {
-        cursor.delete();
-        cursor.continue();
-      }
-    };
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-export async function savePhoto(id, blob) {
-  const db = await openDb();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction("photos", "readwrite");
-    tx.objectStore("photos").put({ id, blob });
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-export async function copyPhoto(fromId, toId) {
-  if (!fromId || fromId === toId) return;
-  const db = await openDb();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction("photos", "readwrite");
-    const store = tx.objectStore("photos");
-    const request = store.get(fromId);
-    request.onsuccess = () => {
-      const row = request.result;
-      if (row?.blob) store.put({ id: toId, blob: row.blob });
-    };
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-export async function getPhotoUrl(id) {
-  const db = await openDb();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction("photos", "readonly");
-    const request = tx.objectStore("photos").get(id);
-    request.onsuccess = () => {
-      const row = request.result;
-      resolve(row?.blob ? URL.createObjectURL(row.blob) : null);
-    };
-    request.onerror = () => reject(request.error);
-  });
-}
-
-export async function addLog(entry) {
-  const row = {
-    id: crypto.randomUUID(),
-    plantId: entry.plantId,
-    type: entry.type,
-    date: entry.date,
-    createdAt: new Date().toISOString(),
+export async function getSettings() {
+  const row = await one("settings", "app");
+  if (!row) return { ...DEFAULT_SETTINGS };
+  return {
+    ...DEFAULT_SETTINGS,
+    ...row,
+    rates: { ...DEFAULT_SETTINGS.rates, ...(row.rates || {}) },
+    incomeCategories: mergeCategories(row.incomeCategories, DEFAULT_SETTINGS.incomeCategories),
+    expenseCategories: mergeCategories(row.expenseCategories, DEFAULT_SETTINGS.expenseCategories),
+    assetCategories: mergeCategories(row.assetCategories, DEFAULT_SETTINGS.assetCategories),
   };
-  const db = await openDb();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction("logs", "readwrite");
-    tx.objectStore("logs").put(row);
-    tx.oncomplete = () => resolve(row);
-    tx.onerror = () => reject(tx.error);
+}
+
+export async function saveSettings(settings) {
+  return put("settings", { id: "app", ...settings });
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.readAsDataURL(blob);
   });
 }
 
-export async function listLogs(plantId) {
+export async function exportAll() {
+  const [assets, transactions, goals, snapshots, settings] = await Promise.all([
+    listAssets(),
+    listTransactions(),
+    listGoals(),
+    listSnapshots(),
+    getSettings(),
+  ]);
   const db = await openDb();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction("logs", "readonly");
-    const request = tx.objectStore("logs").index("plantId").getAll(plantId);
-    request.onsuccess = () => {
-      const rows = request.result || [];
-      rows.sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.createdAt || "").localeCompare(a.createdAt || ""));
-      resolve(rows);
-    };
-    request.onerror = () => reject(request.error);
-  });
-}
-
-async function listAllLogs() {
-  const db = await openDb();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction("logs", "readonly");
-    const request = tx.objectStore("logs").getAll();
+  const attachments = await new Promise((resolve, reject) => {
+    const tx = db.transaction("attachments", "readonly");
+    const request = tx.objectStore("attachments").getAll();
     request.onsuccess = () => resolve(request.result || []);
     request.onerror = () => reject(request.error);
   });
-}
-
-export async function getConfig() {
-  const db = await openDb();
-  return new Promise((resolve, reject) => {
-    if (!db.objectStoreNames.contains("settings")) {
-      resolve(null);
-      return;
-    }
-    const tx = db.transaction("settings", "readonly");
-    const request = tx.objectStore("settings").get("app");
-    request.onsuccess = () => resolve(request.result || null);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-export async function saveConfig(config) {
-  const db = await openDb();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction("settings", "readwrite");
-    tx.objectStore("settings").put({
-      id: "app",
-      locations: config.locations,
-      plantTypes: config.plantTypes,
-      theme: config.theme || "light",
-    });
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-export async function exportData() {
-  const plants = await listPlants();
-  const logs = await listAllLogs();
-  const config = await getConfig();
-  const db = await openDb();
-  const photos = await new Promise((resolve, reject) => {
-    const tx = db.transaction("photos", "readonly");
-    const request = tx.objectStore("photos").getAll();
-    request.onsuccess = () => resolve(request.result || []);
-    request.onerror = () => reject(request.error);
-  });
-  const encodedPhotos = await Promise.all(
-    photos.map(
-      (row) =>
-        new Promise((resolve) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve({ id: row.id, dataUrl: reader.result });
-          reader.readAsDataURL(row.blob);
-        })
-    )
+  const files = await Promise.all(
+    attachments.map(async (row) => ({
+      id: row.id,
+      name: row.name,
+      mime: row.mime,
+      dataUrl: await blobToDataUrl(row.blob),
+    }))
   );
   return {
-    version: 3,
+    app: "bochog-kakei",
+    version: 1,
     exportedAt: new Date().toISOString(),
-    plants,
-    photos: encodedPhotos,
-    logs,
-    config: config
-      ? { locations: config.locations, plantTypes: config.plantTypes, theme: config.theme || "light" }
-      : null,
+    assets,
+    transactions,
+    goals,
+    snapshots,
+    settings,
+    attachments: files,
   };
 }
 
-export async function importData(payload) {
-  if (!payload?.plants) throw new Error("Invalid backup file");
+export async function importAll(payload) {
+  if (!payload || payload.app !== "bochog-kakei" || !Array.isArray(payload.transactions)) {
+    throw new Error("Invalid Bochog Kakei backup");
+  }
   const db = await openDb();
   await new Promise((resolve, reject) => {
-    const stores = ["plants", "photos", "logs"];
-    const tx = db.transaction(stores, "readwrite");
-    tx.objectStore("plants").clear();
-    tx.objectStore("photos").clear();
-    tx.objectStore("logs").clear();
-    for (const plant of payload.plants) tx.objectStore("plants").put(plant);
-    for (const log of payload.logs || []) tx.objectStore("logs").put(log);
+    const names = ["assets", "transactions", "goals", "snapshots", "attachments", "settings"];
+    const tx = db.transaction(names, "readwrite");
+    for (const name of names) tx.objectStore(name).clear();
+    for (const row of payload.assets || []) tx.objectStore("assets").put(row);
+    for (const row of payload.transactions || []) tx.objectStore("transactions").put(row);
+    for (const row of payload.goals || []) tx.objectStore("goals").put(row);
+    for (const row of payload.snapshots || []) tx.objectStore("snapshots").put(row);
+    if (payload.settings) tx.objectStore("settings").put({ id: "app", ...payload.settings });
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
-  for (const photo of payload.photos || []) {
-    const blob = await (await fetch(photo.dataUrl)).blob();
-    await savePhoto(photo.id, blob);
-  }
-  if (payload.config?.locations && payload.config?.plantTypes) {
-    await saveConfig(payload.config);
+  for (const file of payload.attachments || []) {
+    const blob = await (await fetch(file.dataUrl)).blob();
+    await saveAttachment(file.id, blob, file.name, file.mime);
   }
 }

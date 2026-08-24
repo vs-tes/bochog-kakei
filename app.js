@@ -1,310 +1,54 @@
 import {
-  addLog,
-  copyPhoto,
-  deletePlant,
-  exportData,
-  getConfig,
-  getPhotoUrl,
-  getPlant,
-  importData,
-  listLogs,
-  listPlants,
-  saveConfig,
-  savePhoto,
-  savePlant,
+  CURRENCIES,
+  DEFAULT_SETTINGS,
+  deleteAsset,
+  deleteTransaction,
+  exportAll,
+  getAsset,
+  getSettings,
+  getTransaction,
+  importAll,
+  listAssets,
+  listTransactions,
+  saveAsset,
+  saveSettings,
+  saveTransaction,
 } from "./db.js";
-
-const LIGHT = {
-  low: "Low light",
-  medium: "Medium light",
-  bright: "Bright indirect",
-  direct: "Direct sun",
-};
-
-let LOCATIONS = [
-  "Bathroom",
-  "Bedroom",
-  "Dining",
-  "Genkan",
-  "Kitchen",
-  "LaundryRoom",
-  "Living Room",
-  "Stairs",
-  "TatamiRoom",
-  "Toilet 1F",
-  "Toilet 2F",
-];
-
-let PRESETS = {
-  aloe: {
-    label: "Aloe Vera",
-    category: "Succulent (stemless, fleshy leaves)",
-    light: "direct",
-    waterEveryDays: 14,
-    mistEveryDays: 0,
-    fertilizeEveryDays: 45,
-    repotEveryMonths: 24,
-  },
-  calathea: {
-    label: "Calathea (Goeppertia spp.)",
-    category: "Tropical foliage plant; prayer-plant type (high-humidity understory)",
-    light: "medium",
-    waterEveryDays: 5,
-    mistEveryDays: 2,
-    fertilizeEveryDays: 30,
-    repotEveryMonths: 12,
-  },
-  jade: {
-    label: "Dwarf Jade (Portulacaria afra)",
-    category: "Succulent shrub",
-    light: "direct",
-    waterEveryDays: 14,
-    mistEveryDays: 0,
-    fertilizeEveryDays: 45,
-    repotEveryMonths: 24,
-  },
-  ivy: {
-    label: "English Ivy (Hedera helix)",
-    category: "Vining/climbing plant (evergreen climber)",
-    light: "medium",
-    waterEveryDays: 7,
-    mistEveryDays: 3,
-    fertilizeEveryDays: 30,
-    repotEveryMonths: 18,
-  },
-  altissima: {
-    label: "Ficus Altissima",
-    category: "Tree-type indoor plant (Moraceae family)",
-    light: "bright",
-    waterEveryDays: 10,
-    mistEveryDays: 0,
-    fertilizeEveryDays: 30,
-    repotEveryMonths: 18,
-  },
-  microcarpa: {
-    label: "Ficus Microcarpa",
-    category: "Tree-type indoor plant (Moraceae; often bonsai-trained)",
-    light: "bright",
-    waterEveryDays: 10,
-    mistEveryDays: 0,
-    fertilizeEveryDays: 30,
-    repotEveryMonths: 24,
-  },
-  rubberIndoor: {
-    label: "Indoor Rubber Tree (Ficus elastica)",
-    category: "Tree-type indoor plant (latex-bearing Moraceae)",
-    light: "bright",
-    waterEveryDays: 10,
-    mistEveryDays: 0,
-    fertilizeEveryDays: 30,
-    repotEveryMonths: 18,
-  },
-  orchid: {
-    label: "Orchid (general)",
-    category: "Epiphytic flowering plant (many genera; aerial-root growth)",
-    light: "bright",
-    waterEveryDays: 7,
-    mistEveryDays: 3,
-    fertilizeEveryDays: 21,
-    repotEveryMonths: 18,
-  },
-  dieffenbachia: {
-    label: "Dieffenbachia Camille",
-    category: "Tropical aroid foliage plant (Araceae)",
-    light: "medium",
-    waterEveryDays: 7,
-    mistEveryDays: 2,
-    fertilizeEveryDays: 30,
-    repotEveryMonths: 12,
-  },
-  birkin: {
-    label: "Philodendron Birkin",
-    category: "Tropical aroid foliage plant (upright/clumping)",
-    light: "bright",
-    waterEveryDays: 7,
-    mistEveryDays: 1,
-    fertilizeEveryDays: 30,
-    repotEveryMonths: 12,
-  },
-  pothos: {
-    label: "Pothos (Epipremnum aureum)",
-    category: "Trailing/vining aroid (low-maintenance)",
-    light: "medium",
-    waterEveryDays: 7,
-    mistEveryDays: 0,
-    fertilizeEveryDays: 30,
-    repotEveryMonths: 12,
-  },
-  rubber: {
-    label: "Rubber Plant (Ficus elastica)",
-    category: "Tree-type indoor plant (same as Indoor Rubber Tree)",
-    light: "bright",
-    waterEveryDays: 10,
-    mistEveryDays: 0,
-    fertilizeEveryDays: 30,
-    repotEveryMonths: 18,
-  },
-  snake: {
-    label: "Snake Plant (Dracaena trifasciata)",
-    category: "Succulent-like upright foliage plant (rosette growth)",
-    light: "low",
-    waterEveryDays: 21,
-    mistEveryDays: 0,
-    fertilizeEveryDays: 60,
-    repotEveryMonths: 24,
-  },
-  yucca: {
-    label: "Yucca",
-    category: "Arid-type woody rosette plant (xeric desert plant)",
-    light: "direct",
-    waterEveryDays: 14,
-    mistEveryDays: 0,
-    fertilizeEveryDays: 45,
-    repotEveryMonths: 24,
-  },
-  alocasia: {
-    label: "Alocasia",
-    category: "Tropical aroid foliage plant (upright, large leaves)",
-    light: "bright",
-    waterEveryDays: 5,
-    mistEveryDays: 2,
-    fertilizeEveryDays: 30,
-    repotEveryMonths: 12,
-  },
-  maranta: {
-    label: "Maranta (Maranta leuconeura)",
-    category: "Prayer-plant type tropical foliage plant (distinct from Calathea/Goeppertia)",
-    light: "medium",
-    waterEveryDays: 5,
-    mistEveryDays: 2,
-    fertilizeEveryDays: 30,
-    repotEveryMonths: 12,
-  },
-  bamboo: {
-    label: "Lucky Bamboo (Dracaena sanderiana)",
-    category: "Dracaena-type cane plant (not a true bamboo)",
-    light: "medium",
-    waterEveryDays: 7,
-    mistEveryDays: 0,
-    fertilizeEveryDays: 45,
-    repotEveryMonths: 24,
-  },
-};
-
-const LOG_LABELS = {
-  water: "Watered",
-  mist: "Misted",
-  fertilize: "Fertilized",
-  repot: "Repotted",
-};
+import { downloadFile, printReport, toCsv, toExcelXml } from "./export.js";
 
 const app = document.getElementById("app");
-const photoUrls = new Map();
-const homeState = {
-  filter: "all",
-  location: "all",
-  plantType: "all",
-  query: "",
-  selectMode: false,
-  selected: new Set(),
-};
-const settingsState = {
-  locQuery: "",
-  typeQuery: "",
-};
-let THEME = localStorage.getItem("bochog-theme") || "light";
 
-function todayIso() {
+function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function addDays(iso, days) {
-  const d = new Date(`${iso}T12:00:00`);
-  d.setDate(d.getDate() + Number(days));
-  return d.toISOString().slice(0, 10);
+function currentMonth() {
+  return today().slice(0, 7);
 }
 
-function addMonths(iso, months) {
-  const d = new Date(`${iso}T12:00:00`);
-  d.setMonth(d.getMonth() + Number(months));
-  return d.toISOString().slice(0, 10);
+const ui = {
+  month: currentMonth(),
+  txType: "all",
+  txQuery: "",
+  reportKind: "expense",
+};
+
+let settings = { ...DEFAULT_SETTINGS };
+let cache = { assets: [], txs: [] };
+
+function uid() {
+  return crypto.randomUUID();
 }
 
-function parseHash() {
-  const hash = location.hash.replace(/^#/, "") || "/";
-  const parts = hash.split("/").filter(Boolean);
-  if (parts.length === 0) return { name: "home" };
-  if (parts[0] === "settings") return { name: "settings" };
-  if (parts[0] === "new") return { name: "form", id: null };
-  if (parts[0] === "edit" && parts[1]) return { name: "form", id: parts[1].split("?")[0] };
-  if (parts[0] === "plant" && parts[1]) return { name: "detail", id: parts[1].split("?")[0] };
-  return { name: "home" };
+function shiftMonth(key, delta) {
+  const [year, month] = key.split("-").map(Number);
+  const date = new Date(year, month - 1 + delta, 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
 
-function go(path) {
-  location.hash = path;
-}
-
-function daysUntil(iso) {
-  const a = new Date(`${todayIso()}T12:00:00`);
-  const b = new Date(`${iso}T12:00:00`);
-  return Math.round((b - a) / 86400000);
-}
-
-function nextDate(last, every) {
-  if (!last || !every) return null;
-  return addDays(last, every);
-}
-
-function intervalStatus(last, every, { months = false, empty, overdue, now, soon, healthy }) {
-  if (!every) return null;
-  const next = last ? (months ? addMonths(last, every) : addDays(last, every)) : null;
-  if (!next) return { key: "now", label: empty, next: null };
-  const delta = daysUntil(next);
-  if (delta < 0) return { key: "overdue", label: overdue(Math.abs(delta)), next };
-  if (delta === 0) return { key: "now", label: now, next };
-  if (delta <= 2) return { key: "soon", label: soon(delta), next };
-  return { key: "healthy", label: healthy, next };
-}
-
-function waterStatus(plant) {
-  return intervalStatus(plant.lastWatered, plant.waterEveryDays, {
-    empty: "Set first water",
-    overdue: (d) => `Overdue ${d}d`,
-    now: "Water now",
-    soon: (d) => `Due soon · ${d}d`,
-    healthy: "Healthy",
-  });
-}
-
-function mistStatus(plant) {
-  if (!plant.mistEveryDays) return null;
-  const next = nextDate(plant.lastMisted, plant.mistEveryDays);
-  if (!next) return { key: "mist", label: "Mist soon", next: null };
-  const delta = daysUntil(next);
-  if (delta <= 0) return { key: "mist", label: "Mist now", next };
-  return null;
-}
-
-function fertilizeStatus(plant) {
-  return intervalStatus(plant.lastFertilized, plant.fertilizeEveryDays, {
-    empty: "Set first feed",
-    overdue: (d) => `Feed overdue ${d}d`,
-    now: "Fertilize now",
-    soon: (d) => `Feed soon · ${d}d`,
-    healthy: "Fed",
-  });
-}
-
-function repotStatus(plant) {
-  return intervalStatus(plant.lastRepotted, plant.repotEveryMonths, {
-    months: true,
-    empty: "Set first repot",
-    overdue: (d) => `Repot overdue ${d}d`,
-    now: "Repot now",
-    soon: (d) => `Repot soon · ${d}d`,
-    healthy: "Repotted",
-  });
+function monthLabel(key) {
+  const [year, month] = key.split("-").map(Number);
+  return new Date(year, month - 1, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
 }
 
 function prettyDate(iso) {
@@ -316,578 +60,8 @@ function prettyDate(iso) {
   });
 }
 
-function canonicalLocation(value) {
-  if (!value) return "";
-  const compact = value.toLowerCase().replace(/\s+/g, "");
-  return LOCATIONS.find((loc) => loc.toLowerCase().replace(/\s+/g, "") === compact) || value;
-}
-
-async function photoFor(id) {
-  if (!id) return null;
-  if (photoUrls.has(id)) return photoUrls.get(id);
-  const url = await getPhotoUrl(id);
-  if (url) photoUrls.set(id, url);
-  return url;
-}
-
-function uid() {
-  return crypto.randomUUID();
-}
-
-function slugify(name) {
-  const base = String(name || "plant")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "") || "plant";
-  let key = base;
-  let n = 2;
-  while (PRESETS[key]) {
-    key = `${base}-${n}`;
-    n += 1;
-  }
-  return key;
-}
-
-async function persistCatalog() {
-  await saveConfig({ locations: LOCATIONS, plantTypes: PRESETS, theme: THEME });
-}
-
-function applyTheme(theme) {
-  THEME = theme === "dark" ? "dark" : "light";
-  document.documentElement.dataset.theme = THEME;
-  localStorage.setItem("bochog-theme", THEME);
-  const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.content = THEME === "dark" ? "#121a16" : "#1f3d2c";
-}
-
-function applyConfig(config) {
-  if (config?.locations?.length) LOCATIONS = config.locations;
-  if (config?.plantTypes && Object.keys(config.plantTypes).length) PRESETS = config.plantTypes;
-  if (config?.theme) applyTheme(config.theme);
-}
-
-function logoSvg() {
-  return `<img class="logo" src="./icons/icon.svg" alt="" />`;
-}
-
-function locationSelect(selected) {
-  const current = canonicalLocation(selected);
-  const extra = current && !LOCATIONS.includes(current) ? current : null;
-  return `
-    <option value="">Unplaced</option>
-    ${LOCATIONS.map((loc) => `<option value="${escapeAttr(loc)}" ${current === loc ? "selected" : ""}>${escapeHtml(loc)}</option>`).join("")}
-    ${extra ? `<option value="${escapeAttr(extra)}" selected>${escapeHtml(extra)}</option>` : ""}
-  `;
-}
-
-function decorate(plant) {
-  return {
-    ...plant,
-    location: canonicalLocation(plant.location),
-    water: waterStatus(plant),
-    mist: mistStatus(plant),
-    fertilize: fertilizeStatus(plant),
-    repot: repotStatus(plant),
-  };
-}
-
-function groupPlants(plants) {
-  const groups = new Map(LOCATIONS.map((loc) => [loc, []]));
-  const extras = new Map();
-  const unplaced = [];
-  for (const plant of plants) {
-    const loc = plant.location || "";
-    if (!loc) unplaced.push(plant);
-    else if (groups.has(loc)) groups.get(loc).push(plant);
-    else {
-      if (!extras.has(loc)) extras.set(loc, []);
-      extras.get(loc).push(plant);
-    }
-  }
-  const ordered = [];
-  for (const loc of LOCATIONS) {
-    if (groups.get(loc).length) ordered.push({ loc, plants: groups.get(loc) });
-  }
-  for (const [loc, list] of extras) ordered.push({ loc, plants: list });
-  if (unplaced.length) ordered.push({ loc: "Unplaced", plants: unplaced });
-  return ordered;
-}
-
-async function renderHome() {
-  const { filter, location, plantType, query, selectMode, selected } = homeState;
-  const q = query.trim().toLowerCase();
-  const plants = (await listPlants()).map(decorate);
-  plants.sort((a, b) => (a.water.next || "0000-01-01").localeCompare(b.water.next || "0000-01-01"));
-  const visible = plants.filter((p) => {
-    if (filter === "now" && p.water.key !== "now" && p.water.key !== "overdue") return false;
-    if (filter === "soon" && p.water.key !== "soon") return false;
-    if (filter === "healthy" && p.water.key !== "healthy") return false;
-    if (location !== "all" && p.location !== location) return false;
-    if (plantType !== "all" && (p.plantType || "") !== plantType) return false;
-    if (!q) return true;
-    const typeLabel = PRESETS[p.plantType]?.label || "";
-    return [p.name, p.location, p.notes, typeLabel].join(" ").toLowerCase().includes(q);
-  });
-  const groups = groupPlants(visible);
-
-  app.classList.toggle("has-batch", selectMode);
-  app.innerHTML = `
-    <header class="top">
-      <div class="brand">
-        ${logoSvg()}
-        <div>
-          <p class="eyebrow">Plant care</p>
-          <h1>Bochog</h1>
-        </div>
-      </div>
-      <div class="header-actions">
-        <button class="icon-btn" data-go="#/settings" aria-label="Settings" title="Settings">
-          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-            <path fill="currentColor" d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.1 7.1 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.59.24-1.13.56-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.77 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94L2.89 14.52a.5.5 0 0 0-.12.64l1.92 3.32c.14.24.43.34.69.22l2.39-.96c.5.38 1.04.7 1.63.94l.36 2.54c.05.24.26.42.5.42h3.84c.24 0 .45-.18.5-.42l.36-2.54c.59-.24 1.13-.56 1.63-.94l2.39.96c.26.12.55.02.69-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58ZM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2Z"/>
-          </svg>
-        </button>
-        <button class="ghost" id="selectToggle">${selectMode ? "Done" : "Select"}</button>
-        <button class="primary" data-go="#/new">Add plant</button>
-      </div>
-    </header>
-    <div class="row">
-      <label class="field">Location
-        <select id="locationFilter">
-          <option value="all" ${location === "all" ? "selected" : ""}>All rooms</option>
-          ${LOCATIONS.map((loc) => `<option value="${escapeAttr(loc)}" ${location === loc ? "selected" : ""}>${escapeHtml(loc)}</option>`).join("")}
-          <option value="" ${location === "" ? "selected" : ""}>Unplaced</option>
-        </select>
-      </label>
-      <label class="field">Plant name (Type)
-        <select id="typeFilter">
-          <option value="all" ${plantType === "all" ? "selected" : ""}>All types</option>
-          ${Object.entries(PRESETS)
-            .map(([key, preset]) => `<option value="${key}" ${plantType === key ? "selected" : ""}>${escapeHtml(preset.label)}</option>`)
-            .join("")}
-          <option value="" ${plantType === "" ? "selected" : ""}>Custom</option>
-        </select>
-      </label>
-    </div>
-    <input class="search" id="search" type="search" placeholder="Search name, notes" value="${escapeAttr(query)}" />
-    <div class="filters">
-      ${["all", "now", "soon", "healthy"]
-        .map(
-          (key) =>
-            `<button class="chip ${filter === key ? "active" : ""}" data-filter="${key}">${
-              { all: "All", now: "Water now", soon: "Due soon", healthy: "Healthy" }[key]
-            }</button>`
-        )
-        .join("")}
-    </div>
-    ${
-      visible.length === 0
-        ? `<section class="empty">
-            <h2>${plants.length ? "No matching plants" : "No plants here yet"}</h2>
-            <p>${plants.length ? "Try another search or filter." : "Add a plant, take a photo, and Bochog will keep the watering dates for you."}</p>
-            ${plants.length ? "" : `<button class="primary" data-go="#/new">Add your first plant</button>`}
-          </section>`
-        : groups
-            .map(
-              (group) => `
-            <section class="room">
-              <h2 class="room-title">${escapeHtml(group.loc)} <span>${group.plants.length}</span></h2>
-              <div class="list">${group.plants.map((p) => plantCard(p, selectMode, selected.has(p.id))).join("")}</div>
-            </section>`
-            )
-            .join("")
-    }
-    ${
-      selectMode
-        ? `<div class="batch-bar">
-            <button class="primary" id="batchWater" ${selected.size ? "" : "disabled"}>Water ${selected.size || ""}</button>
-            <button class="primary" id="batchMist" ${selected.size ? "" : "disabled"}>Mist</button>
-            <button class="ghost" id="clearSelect">Clear</button>
-          </div>`
-        : ""
-    }
-  `;
-
-  const search = app.querySelector("#search");
-  if (search && document.activeElement === document.body) {
-    /* keep as is */
-  }
-  for (const p of visible) {
-    const img = app.querySelector(`[data-thumb="${p.id}"]`);
-    if (!img) continue;
-    const url = await photoFor(p.id);
-    if (url) {
-      img.replaceWith(Object.assign(document.createElement("img"), { className: "thumb", src: url, alt: p.name }));
-    }
-  }
-}
-
-function plantCard(p, selectMode, isSelected) {
-  const extra = [p.fertilize?.key === "now" || p.fertilize?.key === "overdue" ? `<span class="badge soon">${p.fertilize.label}</span>` : "", p.repot?.key === "now" || p.repot?.key === "overdue" ? `<span class="badge soon">${p.repot.label}</span>` : ""].join("");
-  const wateredToday = p.lastWatered === todayIso();
-  return `
-    <article class="card ${selectMode ? "selecting" : ""}">
-      ${selectMode ? `<input type="checkbox" data-select="${p.id}" ${isSelected ? "checked" : ""} />` : ""}
-      <a class="card-main" href="#/plant/${p.id}">
-        <div class="thumb placeholder" data-thumb="${p.id}">🌿</div>
-        <div class="meta">
-          <h3>${escapeHtml(p.name)}</h3>
-          <p class="when">Next water ${p.water.next ? prettyDate(p.water.next) : "—"}</p>
-          <div class="badges">
-            <span class="badge ${p.water.key}">${p.water.label}</span>
-            ${p.mist ? `<span class="badge mist">${p.mist.label}</span>` : ""}
-            ${extra}
-          </div>
-        </div>
-      </a>
-      ${
-        selectMode
-          ? ""
-          : `<button type="button" class="${wateredToday ? "ghost" : "primary"} water-btn" data-quick-water="${p.id}">${
-              wateredToday ? "Watered" : "Water"
-            }</button>`
-      }
-    </article>
-  `;
-}
-
-async function markCare(plant, type) {
-  const date = todayIso();
-  if (type === "water") plant.lastWatered = date;
-  if (type === "mist") plant.lastMisted = date;
-  if (type === "fertilize") plant.lastFertilized = date;
-  if (type === "repot") plant.lastRepotted = date;
-  await savePlant(plant);
-  await addLog({ plantId: plant.id, type, date });
-}
-
-function nextCloneName(name, existingNames) {
-  const taken = new Set(existingNames.map((n) => n.toLowerCase()));
-  const match = String(name || "Plant").trim().match(/^(.*?)(?:\s+(\d+))?$/);
-  const stem = (match?.[1] || name || "Plant").trim();
-  let n = match?.[2] ? Number(match[2]) + 1 : 2;
-  let candidate = `${stem} ${n}`;
-  while (taken.has(candidate.toLowerCase())) {
-    n += 1;
-    candidate = `${stem} ${n}`;
-  }
-  return candidate;
-}
-
-async function clonePlant(id) {
-  const plant = await getPlant(id);
-  if (!plant) return;
-  const plants = await listPlants();
-  const newId = uid();
-  const clone = {
-    ...plant,
-    id: newId,
-    name: nextCloneName(
-      plant.name,
-      plants.map((p) => p.name)
-    ),
-    createdAt: new Date().toISOString(),
-  };
-  await savePlant(clone);
-  await copyPhoto(id, newId);
-  sessionStorage.setItem("bochogJustCloned", newId);
-  go(`#/edit/${newId}`);
-}
-
-async function renderSettings() {
-  const locQ = settingsState.locQuery.trim().toLowerCase();
-  const typeQ = settingsState.typeQuery.trim().toLowerCase();
-  const locItems = LOCATIONS.map((loc, i) => ({ loc, i })).filter(({ loc }) => !locQ || loc.toLowerCase().includes(locQ));
-  const typeItems = Object.entries(PRESETS).filter(
-    ([, preset]) =>
-      !typeQ ||
-      [preset.label, preset.category].join(" ").toLowerCase().includes(typeQ)
-  );
-  app.innerHTML = `
-    <button class="ghost" data-go="#/">← All plants</button>
-    <h1 style="margin: 8px 0 16px">Settings</h1>
-
-    <h2 class="section-title">Theme</h2>
-    <p class="hint">Choose a light or dark look for Bochog on this device.</p>
-    <div class="theme-row">
-      <button type="button" class="chip ${THEME === "light" ? "active" : ""}" data-theme-pick="light">Light</button>
-      <button type="button" class="chip ${THEME === "dark" ? "active" : ""}" data-theme-pick="dark">Dark</button>
-    </div>
-
-    <h2 class="section-title">Backup</h2>
-    <p class="hint">Export includes photos, rooms, plant names, care logs, and schedules. Import replaces data on this device.</p>
-    <div class="footer-links">
-      <button class="ghost" id="exportBtn">Export backup</button>
-      <label class="ghost file-btn">Import backup<input id="importFile" type="file" accept="application/json" /></label>
-    </div>
-
-    <h2 class="section-title">Locations</h2>
-    <p class="hint">Rooms used in the Location dropdown.</p>
-    <input class="search" id="locSearch" type="search" placeholder="Search rooms" value="${escapeAttr(settingsState.locQuery)}" />
-    <label class="field">Jump to a room
-      <select id="locJump">
-        <option value="">All rooms</option>
-        ${LOCATIONS.map((loc) => `<option value="${escapeAttr(loc)}" ${settingsState.locQuery === loc ? "selected" : ""}>${escapeHtml(loc)}</option>`).join("")}
-      </select>
-    </label>
-    <ul class="edit-list">
-      ${
-        locItems.length
-          ? locItems
-              .map(
-                ({ loc, i }) => `
-        <li>
-          <input data-loc-index="${i}" value="${escapeAttr(loc)}" />
-          <button type="button" class="danger compact" data-del-loc="${i}">Delete</button>
-        </li>`
-              )
-              .join("")
-          : `<li class="hint">No rooms match.</li>`
-      }
-    </ul>
-    <div class="add-row">
-      <input id="newLocation" placeholder="New room" />
-      <button type="button" class="primary" id="addLocation">Add</button>
-    </div>
-
-    <h2 class="section-title">Plant name (Type)</h2>
-    <p class="hint">Names in the plant dropdown. Category is saved into notes when you pick one.</p>
-    <input class="search" id="typeSearch" type="search" placeholder="Search plant names" value="${escapeAttr(settingsState.typeQuery)}" />
-    <label class="field">Jump to a plant name
-      <select id="typeJump">
-        <option value="">All plant names</option>
-        ${Object.entries(PRESETS)
-          .map(([key, preset]) => `<option value="${key}" ${settingsState.typeQuery === preset.label ? "selected" : ""}>${escapeHtml(preset.label)}</option>`)
-          .join("")}
-      </select>
-    </label>
-    <div class="type-list">
-      ${
-        typeItems.length
-          ? typeItems
-              .map(
-                ([key, preset]) => `
-        <article class="type-card">
-          <label>Name<input data-type-label="${key}" value="${escapeAttr(preset.label)}" /></label>
-          <label>Category<textarea data-type-cat="${key}">${escapeHtml(preset.category || "")}</textarea></label>
-          <button type="button" class="danger compact" data-del-type="${key}">Delete</button>
-        </article>`
-              )
-              .join("")
-          : `<p class="hint">No plant names match.</p>`
-      }
-    </div>
-    <div class="type-card">
-      <label>New name<input id="newTypeName" placeholder="Monstera" /></label>
-      <label>Category<textarea id="newTypeCategory" placeholder="Tropical foliage plant"></textarea></label>
-      <button type="button" class="primary" id="addType">Add plant name (Type)</button>
-    </div>
-  `;
-}
-
-async function renderDetail(id) {
-  const plant = await getPlant(id);
-  if (!plant) {
-    go("#/");
-    return;
-  }
-  const decorated = decorate(plant);
-  const photo = await photoFor(plant.id);
-  const logs = await listLogs(plant.id);
-  app.innerHTML = `
-    <button class="ghost" data-go="#/">← All plants</button>
-    <div class="detail-hero">
-      ${photo ? `<img src="${photo}" alt="${escapeHtml(plant.name)}" />` : `<div class="hero-fallback">🌿</div>`}
-    </div>
-    <header class="top">
-      <div>
-        <p class="eyebrow">${escapeHtml(decorated.location || "Unplaced")}</p>
-        <h1>${escapeHtml(plant.name)}</h1>
-        ${plant.plantType && PRESETS[plant.plantType] ? `<p class="where">${escapeHtml(PRESETS[plant.plantType].category)}</p>` : ""}
-      </div>
-      <div class="header-actions">
-        <button class="ghost" data-clone="${plant.id}">Clone</button>
-        <button class="ghost" data-go="#/edit/${plant.id}">Edit</button>
-      </div>
-    </header>
-    <div class="badges">
-      <span class="badge ${decorated.water.key}">${decorated.water.label}</span>
-      ${decorated.mist ? `<span class="badge mist">${decorated.mist.label}</span>` : ""}
-      ${decorated.fertilize ? `<span class="badge ${decorated.fertilize.key}">${decorated.fertilize.label}</span>` : ""}
-      ${decorated.repot ? `<span class="badge ${decorated.repot.key}">${decorated.repot.label}</span>` : ""}
-    </div>
-    <div class="actions">
-      <button class="primary" data-care="water">Mark watered</button>
-      <button class="primary" data-care="mist" ${plant.mistEveryDays ? "" : "disabled"}>Mark misted</button>
-      <button class="primary" data-care="fertilize" ${plant.fertilizeEveryDays ? "" : "disabled"}>Mark fertilized</button>
-      <button class="primary" data-care="repot" ${plant.repotEveryMonths ? "" : "disabled"}>Mark repotted</button>
-    </div>
-    <div class="stat-grid">
-      <div class="stat"><span>Water every</span><strong>${plant.waterEveryDays} days</strong></div>
-      <div class="stat"><span>Last watered</span><strong>${prettyDate(plant.lastWatered)}</strong></div>
-      <div class="stat"><span>Next water</span><strong>${prettyDate(decorated.water.next)}</strong></div>
-      <div class="stat"><span>Light</span><strong>${LIGHT[plant.light] || "—"}</strong></div>
-      <div class="stat"><span>Mist every</span><strong>${plant.mistEveryDays ? `${plant.mistEveryDays} days` : "Off"}</strong></div>
-      <div class="stat"><span>Last misted</span><strong>${prettyDate(plant.lastMisted)}</strong></div>
-      <div class="stat"><span>Fertilize every</span><strong>${plant.fertilizeEveryDays ? `${plant.fertilizeEveryDays} days` : "Off"}</strong></div>
-      <div class="stat"><span>Last fertilized</span><strong>${prettyDate(plant.lastFertilized)}</strong></div>
-      <div class="stat"><span>Repot every</span><strong>${plant.repotEveryMonths ? `${plant.repotEveryMonths} months` : "Off"}</strong></div>
-      <div class="stat"><span>Last repotted</span><strong>${prettyDate(plant.lastRepotted)}</strong></div>
-    </div>
-    ${plant.notes ? `<h2 class="section-title">Notes</h2><p class="notes">${escapeHtml(plant.notes)}</p>` : ""}
-    <h2 class="section-title">Care log</h2>
-    ${
-      logs.length
-        ? `<ol class="log">${logs
-            .slice(0, 30)
-            .map((row) => `<li><strong>${LOG_LABELS[row.type] || row.type}</strong> ${prettyDate(row.date)}</li>`)
-            .join("")}</ol>`
-        : `<p class="hint">No history yet. Mark watered, misted, fertilized, or repotted to start the log.</p>`
-    }
-  `;
-}
-
-function formValues(plant) {
-  return {
-    name: plant?.name || "",
-    plantType: plant?.plantType || "",
-    location: canonicalLocation(plant?.location || ""),
-    light: plant?.light || "bright",
-    waterEveryDays: plant?.waterEveryDays ?? 7,
-    mistEveryDays: plant?.mistEveryDays ?? "",
-    lastWatered: plant?.lastWatered || "",
-    lastMisted: plant?.lastMisted || "",
-    fertilizeEveryDays: plant?.fertilizeEveryDays ?? "",
-    lastFertilized: plant?.lastFertilized || "",
-    repotEveryMonths: plant?.repotEveryMonths ?? "",
-    lastRepotted: plant?.lastRepotted || "",
-    notes: plant?.notes || "",
-  };
-}
-
-async function renderForm(id) {
-  const plant = id ? await getPlant(id) : null;
-  const v = formValues(plant);
-  const photo = plant ? await photoFor(plant.id) : null;
-  const justCloned = plant && sessionStorage.getItem("bochogJustCloned") === plant.id;
-  if (justCloned) sessionStorage.removeItem("bochogJustCloned");
-  app.innerHTML = `
-    <div class="form-top">
-      <button class="ghost" type="button" data-go="${plant ? `#/plant/${plant.id}` : "#/"}">← Cancel</button>
-      <button class="primary" type="submit" form="plantForm">Save plant</button>
-    </div>
-    <h1 style="margin: 8px 0 16px">${justCloned ? "Cloned plant" : plant ? "Edit plant" : "New plant"}</h1>
-    ${justCloned ? `<p class="hint">Same photo, room, and watering schedule. Rename it or change the location, then save.</p>` : ""}
-    <form class="form" id="plantForm">
-      <label>Plant name (Type)
-        <select id="preset" name="plantType">
-          <option value="">Custom</option>
-          ${Object.entries(PRESETS)
-            .map(([key, preset]) => `<option value="${key}" ${v.plantType === key ? "selected" : ""}>${escapeHtml(preset.label)}</option>`)
-            .join("")}
-        </select>
-      </label>
-      <label>Name<input name="name" required value="${escapeAttr(v.name)}" placeholder="Monstera" /></label>
-      <div class="row">
-        <label>Location
-          <select name="location">${locationSelect(v.location)}</select>
-        </label>
-        <label>Light
-          <select name="light">
-            ${Object.entries(LIGHT)
-              .map(([key, label]) => `<option value="${key}" ${v.light === key ? "selected" : ""}>${label}</option>`)
-              .join("")}
-          </select>
-        </label>
-      </div>
-      <div class="photo-picker">
-        <div id="photoPreview">${photo ? `<img src="${photo}" alt="" />` : ""}</div>
-        <label class="primary file-btn" style="text-align:center">
-          ${photo ? "Change photo" : "Add photo"}
-          <input id="photoInput" type="file" accept="image/*" />
-        </label>
-      </div>
-      <div class="row">
-        <label>Water every (days)<input name="waterEveryDays" type="number" min="1" required value="${v.waterEveryDays}" /></label>
-        <label>Mist every (days)<input name="mistEveryDays" type="number" min="0" placeholder="Off" value="${v.mistEveryDays}" /></label>
-      </div>
-      <div class="row">
-        <label>Last watered<input name="lastWatered" type="date" value="${v.lastWatered}" /></label>
-        <label>Last misted<input name="lastMisted" type="date" value="${v.lastMisted}" /></label>
-      </div>
-      <div class="row">
-        <label>Fertilize every (days)<input name="fertilizeEveryDays" type="number" min="0" placeholder="Off" value="${v.fertilizeEveryDays}" /></label>
-        <label>Last fertilized<input name="lastFertilized" type="date" value="${v.lastFertilized}" /></label>
-      </div>
-      <div class="row">
-        <label>Repot every (months)<input name="repotEveryMonths" type="number" min="0" placeholder="Off" value="${v.repotEveryMonths}" /></label>
-        <label>Last repotted<input name="lastRepotted" type="date" value="${v.lastRepotted}" /></label>
-      </div>
-      <label>Notes<textarea name="notes" placeholder="Likes to dry out a little…">${escapeHtml(v.notes)}</textarea></label>
-      ${plant ? `<button class="ghost" type="button" id="cloneBtn">Clone as new plant</button>` : ""}
-      ${plant ? `<button class="danger" type="button" id="deleteBtn">Delete plant</button>` : ""}
-    </form>
-  `;
-
-  let photoBlob = null;
-  app.querySelector("#photoInput").addEventListener("change", async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    photoBlob = await compressImage(file);
-    const url = URL.createObjectURL(photoBlob);
-    app.querySelector("#photoPreview").innerHTML = `<img src="${url}" alt="" />`;
-  });
-
-  app.querySelector("#preset")?.addEventListener("change", (e) => {
-    const preset = PRESETS[e.target.value];
-    const form = app.querySelector("#plantForm");
-    if (!preset) return;
-    form.name.value = preset.label;
-    form.light.value = preset.light;
-    form.waterEveryDays.value = preset.waterEveryDays;
-    form.mistEveryDays.value = preset.mistEveryDays || "";
-    form.fertilizeEveryDays.value = preset.fertilizeEveryDays || "";
-    form.repotEveryMonths.value = preset.repotEveryMonths || "";
-    if (!form.notes.value.trim()) form.notes.value = preset.category;
-  });
-
-  app.querySelector("#plantForm").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const data = new FormData(e.target);
-    const next = {
-      id: plant?.id || uid(),
-      name: String(data.get("name")).trim(),
-      plantType: String(data.get("plantType") || "").trim(),
-      location: canonicalLocation(String(data.get("location") || "").trim()),
-      light: String(data.get("light")),
-      waterEveryDays: Number(data.get("waterEveryDays")),
-      mistEveryDays: Number(data.get("mistEveryDays")) || 0,
-      lastWatered: String(data.get("lastWatered")) || null,
-      lastMisted: String(data.get("lastMisted")) || null,
-      fertilizeEveryDays: Number(data.get("fertilizeEveryDays")) || 0,
-      lastFertilized: String(data.get("lastFertilized")) || null,
-      repotEveryMonths: Number(data.get("repotEveryMonths")) || 0,
-      lastRepotted: String(data.get("lastRepotted")) || null,
-      notes: String(data.get("notes")).trim(),
-      createdAt: plant?.createdAt || new Date().toISOString(),
-    };
-    await savePlant(next);
-    if (photoBlob) await savePhoto(next.id, photoBlob);
-    photoUrls.delete(next.id);
-    go(`#/plant/${next.id}`);
-  });
-
-  app.querySelector("#cloneBtn")?.addEventListener("click", () => clonePlant(plant.id));
-
-  app.querySelector("#deleteBtn")?.addEventListener("click", async () => {
-    if (!confirm(`Delete ${plant.name}?`)) return;
-    await deletePlant(plant.id);
-    photoUrls.delete(plant.id);
-    go("#/");
-  });
-}
-
 function escapeHtml(value) {
-  return String(value || "")
+  return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
@@ -897,262 +71,793 @@ function escapeAttr(value) {
   return escapeHtml(value).replaceAll('"', "&quot;");
 }
 
-function compressImage(file) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.onload = () => {
-      const max = 1200;
-      const scale = Math.min(1, max / Math.max(img.width, img.height));
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.round(img.width * scale);
-      canvas.height = Math.round(img.height * scale);
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      canvas.toBlob(
-        (blob) => {
-          URL.revokeObjectURL(url);
-          resolve(blob || file);
-        },
-        "image/jpeg",
-        0.82
-      );
-    };
-    img.onerror = reject;
-    img.src = url;
-  });
+function go(hash) {
+  location.hash = hash;
+}
+
+function parseRoute() {
+  const parts = (location.hash.replace(/^#/, "") || "/").split("/").filter(Boolean);
+  if (!parts.length) return { name: "accounts" };
+  const [a, b] = parts;
+  if (a === "account" && b === "new") return { name: "account-form", id: null };
+  if (a === "account" && b) return { name: "account-form", id: b };
+  if (a === "activity" && b === "new") return { name: "tx-form", id: null };
+  if (a === "activity" && b) return { name: "tx-form", id: b };
+  if (a === "activity") return { name: "activity" };
+  if (a === "report") return { name: "report" };
+  if (a === "settings") return { name: "settings" };
+  if (a === "assets" || a === "budget" || a === "goals" || a === "reports") return { name: "accounts" };
+  return { name: "accounts" };
+}
+
+function applyTheme(theme) {
+  settings.theme = theme === "dark" ? "dark" : "light";
+  document.documentElement.dataset.theme = settings.theme;
+  localStorage.setItem("bochog-theme", settings.theme);
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = settings.theme === "dark" ? "#0f1724" : "#1e4d8c";
+}
+
+function formatMoney(amount, currency = settings.defaultCurrency) {
+  const n = Number(amount) || 0;
+  const digits = currency === "JPY" ? 0 : 2;
+  const symbol = { JPY: "¥", PHP: "₱", USD: "$" }[currency] || "";
+  return `${symbol}${n.toLocaleString(undefined, {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  })}`;
+}
+
+function toDefault(amount, currency) {
+  const rates = settings.rates || DEFAULT_SETTINGS.rates;
+  const from = rates[currency] || 1;
+  const to = rates[settings.defaultCurrency] || 1;
+  return (Number(amount) || 0) * (from / to);
+}
+
+function catMeta(id) {
+  return settings.assetCategories.find((item) => item.id === id) || { id, label: id, liability: false, group: "other" };
+}
+
+function categoryLabel(kind, id) {
+  const list =
+    kind === "income"
+      ? settings.incomeCategories
+      : kind === "expense"
+        ? settings.expenseCategories
+        : settings.assetCategories;
+  return list.find((item) => item.id === id)?.label || id || "—";
+}
+
+function isLiability(asset) {
+  const cat = catMeta(asset?.category);
+  return Boolean(asset?.liability || cat.liability || cat.group === "out");
+}
+
+function groupOf(asset) {
+  const cat = catMeta(asset.category);
+  if (cat.group === "in" || cat.group === "out") return cat.group;
+  if (["cash", "bank", "savings"].includes(asset.category)) return "in";
+  if (["credit-card", "bill"].includes(asset.category) || isLiability(asset)) return "out";
+  return "other";
+}
+
+function txKind(row) {
+  if (row.type === "income" || row.type === "deposit") return "deposit";
+  if (row.type === "expense" || row.type === "payment") return "payment";
+  if (row.type === "adjust" || row.type === "transfer") return row.type;
+  return "payment";
+}
+
+async function reload() {
+  const [assets, txs, nextSettings] = await Promise.all([listAssets(), listTransactions(), getSettings()]);
+  cache = { assets, txs };
+  settings = nextSettings;
+  applyTheme(settings.theme);
+}
+
+function moneyNow() {
+  let inBanks = 0;
+  let cards = 0;
+  let bills = 0;
+  for (const row of cache.assets) {
+    const value = toDefault(row.value, row.currency);
+    const group = groupOf(row);
+    if (group === "in") inBanks += value;
+    else if (row.category === "credit-card") cards += value;
+    else if (group === "out") bills += value;
+  }
+  const comingOut = cards + bills;
+  return { inBanks, cards, bills, comingOut, available: inBanks - comingOut };
+}
+
+function monthTxs(month = ui.month) {
+  return cache.txs.filter((row) => (row.date || "").startsWith(month));
+}
+
+function flowFor(rows) {
+  let income = 0;
+  let expense = 0;
+  for (const row of rows) {
+    const kind = txKind(row);
+    const value = toDefault(row.amount, row.currency);
+    if (kind === "deposit") income += value;
+    if (kind === "payment") expense += value;
+  }
+  return { income, expense, left: income - expense };
+}
+
+function groupSum(rows, kind) {
+  const want = kind === "income" ? "deposit" : "payment";
+  const map = new Map();
+  for (const row of rows.filter((item) => txKind(item) === want)) {
+    const key = row.category || "other";
+    map.set(key, (map.get(key) || 0) + toDefault(row.amount, row.currency));
+  }
+  return [...map.entries()].sort((a, b) => b[1] - a[1]);
+}
+
+function tabbar(active) {
+  const items = [
+    ["#/", "Accounts", "accounts"],
+    ["#/activity", "Activity", "activity"],
+    ["#/report", "Report", "report"],
+    ["#/settings", "Settings", "settings"],
+  ];
+  return `<nav class="tabbar">${items
+    .map(
+      ([href, label, key]) =>
+        `<a href="${href}" class="${active === key ? "active" : ""}">${label}</a>`
+    )
+    .join("")}</nav>`;
+}
+
+function logo() {
+  return `<img class="logo" src="./icons/icon.svg" alt="" />`;
+}
+
+function monthNav() {
+  return `<nav class="month-nav">
+    <button class="icon-btn" id="prevMonth" type="button">‹</button>
+    <h2>${escapeHtml(monthLabel(ui.month))}</h2>
+    <button class="icon-btn" id="nextMonth" type="button">›</button>
+  </nav>`;
+}
+
+function barChart(items, kind) {
+  const max = Math.max(1, ...items.map(([, value]) => value));
+  if (!items.length) return `<p class="hint">Nothing in this month yet.</p>`;
+  return `<div class="bar-list">${items
+    .slice(0, 8)
+    .map(([key, value]) => {
+      const pct = Math.max(6, Math.round((value / max) * 100));
+      return `<div class="bar-row">
+        <span>${escapeHtml(categoryLabel(kind, key))}</span>
+        <div class="bar-track ${kind}"><i style="width:${pct}%"></i></div>
+        <strong>${formatMoney(value)}</strong>
+      </div>`;
+    })
+    .join("")}</div>`;
+}
+
+function accountCard(row) {
+  const cat = catMeta(row.category);
+  const due = row.dueDate ? ` · due ${prettyDate(row.dueDate)}` : "";
+  const cls = groupOf(row) === "out" ? "out" : "in";
+  return `<article class="card">
+    <a class="card-main" href="#/account/${row.id}">
+      <div class="meta">
+        <h3>${escapeHtml(row.name)}</h3>
+        <p class="when">${escapeHtml(cat.label)}${due}</p>
+      </div>
+      <strong class="amount ${cls}">${formatMoney(row.value, row.currency)}</strong>
+    </a>
+  </article>`;
+}
+
+function sectionList(title, rows) {
+  if (!rows.length) return "";
+  return `<h2 class="section-title">${escapeHtml(title)}</h2>
+    <div class="list">${rows.map(accountCard).join("")}</div>`;
+}
+
+async function renderAccounts() {
+  const now = moneyNow();
+  const cash = cache.assets.filter((row) => groupOf(row) === "in").sort(byName);
+  const cards = cache.assets.filter((row) => row.category === "credit-card").sort(byName);
+  const bills = cache.assets.filter((row) => row.category === "bill" || (groupOf(row) === "out" && row.category !== "credit-card")).sort(byDue);
+  app.innerHTML = `
+    <header class="top">
+      <div class="brand">
+        ${logo()}
+        <div>
+          <p class="eyebrow">Household money</p>
+          <h1>Bochog Kakei</h1>
+        </div>
+      </div>
+      <button class="primary" data-go="#/account/new">Add</button>
+    </header>
+    <section class="hero">
+      <p class="eyebrow">Current savings</p>
+      <p class="hero-amount">${formatMoney(now.available)}</p>
+      <div class="hero-split">
+        <div>
+          <span>In banks</span>
+          <strong class="amount in">${formatMoney(now.inBanks)}</strong>
+        </div>
+        <div>
+          <span>Coming out</span>
+          <strong class="amount out">${formatMoney(now.comingOut)}</strong>
+        </div>
+      </div>
+      <p class="hint" style="margin-top:12px">Cash and bank balances minus credit cards, utilities, insurance, and other bills due.</p>
+    </section>
+    ${
+      cache.assets.length
+        ? `${sectionList("Cash & banks", cash)}
+           ${sectionList("Credit cards", cards)}
+           ${sectionList("Bills due", bills)}`
+        : `<div class="empty">
+            <h2>Start with balances</h2>
+            <p>Add each bank or cash account, then add credit cards and bills (utilities, insurance). Current savings is banks minus those upcoming expenses.</p>
+            <button class="primary" data-go="#/account/new">Add an account</button>
+          </div>`
+    }
+    ${tabbar("accounts")}
+  `;
+}
+
+function byName(a, b) {
+  return (a.name || "").localeCompare(b.name || "");
+}
+
+function byDue(a, b) {
+  return (a.dueDate || "9999").localeCompare(b.dueDate || "9999") || byName(a, b);
+}
+
+async function renderAccountForm(id) {
+  const row = id ? await getAsset(id) : null;
+  const isBill = (row?.category || "bank") === "bill";
+  app.innerHTML = `
+    <div class="form-top">
+      <button class="ghost" data-go="#/">Back</button>
+      ${id ? `<button class="danger compact" id="deleteAccount" type="button">Delete</button>` : ""}
+    </div>
+    <h1>${id ? "Account" : "New account"}</h1>
+    <form class="form" id="accountForm">
+      <label>Name
+        <input name="name" required value="${escapeAttr(row?.name || "")}" placeholder="MUFG, cash wallet, Tokyo Gas…" />
+      </label>
+      <div class="row">
+        <label>Type
+          <select name="category" id="accountType">
+            ${settings.assetCategories
+              .map(
+                (cat) =>
+                  `<option value="${cat.id}" ${ (row?.category || "bank") === cat.id ? "selected" : "" }>${escapeHtml(cat.label)}</option>`
+              )
+              .join("")}
+          </select>
+        </label>
+        <label>Currency
+          <select name="currency">
+            ${CURRENCIES.map((c) => `<option ${ (row?.currency || settings.defaultCurrency) === c ? "selected" : "" }>${c}</option>`).join("")}
+          </select>
+        </label>
+      </div>
+      <label id="balanceLabel">${isBill || row?.category === "credit-card" ? "Amount due" : "Current balance"}
+        <input name="value" type="number" step="any" required value="${escapeAttr(row?.value ?? "")}" />
+      </label>
+      <label id="dueField" class="${isBill ? "" : "hidden"}">Due date
+        <input name="dueDate" type="date" value="${escapeAttr(row?.dueDate || "")}" />
+      </label>
+      <label>Notes
+        <textarea name="notes">${escapeHtml(row?.notes || "")}</textarea>
+      </label>
+      <button class="primary" type="submit">Save</button>
+    </form>
+    ${tabbar("accounts")}
+  `;
+}
+
+async function renderActivity() {
+  const q = ui.txQuery.trim().toLowerCase();
+  const rows = monthTxs()
+    .filter((row) => ui.txType === "all" || txKind(row) === ui.txType)
+    .filter((row) => !q || [row.name, row.notes, categoryLabel(txKind(row) === "deposit" ? "income" : "expense", row.category)].join(" ").toLowerCase().includes(q))
+    .sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.createdAt || "").localeCompare(a.createdAt || ""));
+  app.innerHTML = `
+    <header class="top">
+      <div>
+        <p class="eyebrow">Transactions</p>
+        <h1>Activity</h1>
+      </div>
+      <button class="primary" data-go="#/activity/new">Add</button>
+    </header>
+    ${monthNav()}
+    <input class="search" id="txSearch" type="search" placeholder="Search" value="${escapeAttr(ui.txQuery)}" />
+    <div class="filters">
+      ${["all", "payment", "deposit", "transfer", "adjust"]
+        .map((key) => `<button class="chip ${ui.txType === key ? "active" : ""}" data-tx-type="${key}">${key === "all" ? "All" : key[0].toUpperCase() + key.slice(1)}</button>`)
+        .join("")}
+    </div>
+    ${
+      rows.length
+        ? `<div class="list">${rows
+            .map((row) => {
+              const kind = txKind(row);
+              const asset = cache.assets.find((item) => item.id === row.assetId);
+              const to = cache.assets.find((item) => item.id === row.toAssetId);
+              const sign = kind === "deposit" ? "+" : kind === "payment" ? "−" : kind === "adjust" ? "=" : "→";
+              const cls = kind === "deposit" ? "in" : kind === "payment" ? "out" : "";
+              const where = kind === "transfer"
+                ? `${asset?.name || "Account"} → ${to?.name || "Account"}`
+                : asset?.name || categoryLabel(kind === "deposit" ? "income" : "expense", row.category);
+              return `<article class="card">
+                <a class="card-main" href="#/activity/${row.id}">
+                  <div class="meta">
+                    <h3>${escapeHtml(row.name || kind)}</h3>
+                    <p class="when">${prettyDate(row.date)} · ${escapeHtml(where)}</p>
+                  </div>
+                  <strong class="amount ${cls}">${sign}${formatMoney(row.amount, row.currency)}</strong>
+                </a>
+              </article>`;
+            })
+            .join("")}</div>`
+        : `<div class="empty"><h2>No activity this month</h2><p>Add a payment, deposit, or transfer. Account balances update when you save.</p></div>`
+    }
+    ${tabbar("activity")}
+  `;
+}
+
+function txTypeOptions(current) {
+  return ["payment", "deposit", "transfer", "adjust"]
+    .map((key) => `<button type="button" class="chip ${current === key ? "active" : ""}" data-pick-type="${key}">${key[0].toUpperCase() + key.slice(1)}</button>`)
+    .join("");
+}
+
+function accountOptions(selected, extra = "") {
+  return `<option value="">${extra || "Select account"}</option>${cache.assets
+    .map((row) => `<option value="${row.id}" ${selected === row.id ? "selected" : ""}>${escapeHtml(row.name)}</option>`)
+    .join("")}`;
+}
+
+async function renderTxForm(id) {
+  const row = id ? await getTransaction(id) : null;
+  const kind = row ? txKind(row) : "payment";
+  const cats = kind === "deposit" ? settings.incomeCategories : settings.expenseCategories;
+  app.innerHTML = `
+    <div class="form-top">
+      <button class="ghost" data-go="#/activity">Back</button>
+      ${id ? `<button class="danger compact" id="deleteTx" type="button">Delete</button>` : ""}
+    </div>
+    <h1>${id ? "Transaction" : "New transaction"}</h1>
+    <form class="form" id="txForm" data-kind="${kind}">
+      <div class="type-toggle">${txTypeOptions(kind)}</div>
+      <label>Date
+        <input name="date" type="date" required value="${escapeAttr(row?.date || today())}" />
+      </label>
+      <label>Name
+        <input name="name" value="${escapeAttr(row?.name || "")}" placeholder="Electric bill, salary, card payment…" />
+      </label>
+      <label>Amount
+        <input name="amount" type="number" step="any" required value="${escapeAttr(row?.amount ?? "")}" />
+      </label>
+      <div class="row">
+        <label>Currency
+          <select name="currency">
+            ${CURRENCIES.map((c) => `<option ${ (row?.currency || settings.defaultCurrency) === c ? "selected" : "" }>${c}</option>`).join("")}
+          </select>
+        </label>
+        <label id="categoryField" class="${kind === "transfer" || kind === "adjust" ? "hidden" : ""}">Category
+          <select name="category">
+            ${cats.map((cat) => `<option value="${cat.id}" ${row?.category === cat.id ? "selected" : ""}>${escapeHtml(cat.label)}</option>`).join("")}
+          </select>
+        </label>
+      </div>
+      <label id="assetField">${kind === "transfer" ? "From" : "Account"}
+        <select name="assetId" required>${accountOptions(row?.assetId)}</select>
+      </label>
+      <label id="toField" class="${kind === "transfer" ? "" : "hidden"}">To
+        <select name="toAssetId">${accountOptions(row?.toAssetId, "Select account")}</select>
+      </label>
+      <label>Notes
+        <textarea name="notes">${escapeHtml(row?.notes || "")}</textarea>
+      </label>
+      <p class="hint">Payment, deposit, and transfer update the account balances. Adjustment sets the account to this amount.</p>
+      <button class="primary" type="submit">Save</button>
+    </form>
+    ${tabbar("activity")}
+  `;
+}
+
+async function renderReport() {
+  const rows = monthTxs();
+  const flow = flowFor(rows);
+  const kind = ui.reportKind;
+  const items = groupSum(rows, kind);
+  app.innerHTML = `
+    <header class="top">
+      <div>
+        <p class="eyebrow">This month</p>
+        <h1>Report</h1>
+      </div>
+    </header>
+    ${monthNav()}
+    <section class="hero">
+      <div class="hero-split">
+        <div>
+          <span>Income</span>
+          <strong class="amount in">${formatMoney(flow.income)}</strong>
+        </div>
+        <div>
+          <span>Expenses</span>
+          <strong class="amount out">${formatMoney(flow.expense)}</strong>
+        </div>
+      </div>
+    </section>
+    <div class="filters">
+      <button class="chip ${kind === "expense" ? "active" : ""}" data-report-kind="expense">Expenses</button>
+      <button class="chip ${kind === "income" ? "active" : ""}" data-report-kind="income">Income</button>
+    </div>
+    ${barChart(items, kind)}
+    <div class="footer-links">
+      <button class="ghost" id="csvBtn" type="button">CSV</button>
+      <button class="ghost" id="excelBtn" type="button">Excel</button>
+      <button class="ghost" id="pdfBtn" type="button">Print / PDF</button>
+    </div>
+    ${tabbar("report")}
+  `;
+}
+
+function reportRows() {
+  const want = ui.reportKind === "income" ? "deposit" : "payment";
+  return monthTxs()
+    .filter((row) => txKind(row) === want)
+    .sort((a, b) => (a.date || "").localeCompare(b.date || ""))
+    .map((row) => [
+      row.date,
+      row.name || "",
+      categoryLabel(ui.reportKind, row.category),
+      cache.assets.find((item) => item.id === row.assetId)?.name || "",
+      row.amount,
+      row.currency || settings.defaultCurrency,
+    ]);
+}
+
+async function renderSettings() {
+  app.innerHTML = `
+    <header class="top">
+      <div>
+        <p class="eyebrow">This device only</p>
+        <h1>Settings</h1>
+      </div>
+    </header>
+    <h2 class="section-title">Appearance</h2>
+    <div class="theme-row">
+      <button class="chip ${settings.theme === "light" ? "active" : ""}" data-theme-pick="light">Light</button>
+      <button class="chip ${settings.theme === "dark" ? "active" : ""}" data-theme-pick="dark">Dark</button>
+    </div>
+    <h2 class="section-title">Currency</h2>
+    <label>Default
+      <select id="defaultCurrency">
+        ${CURRENCIES.map((c) => `<option ${settings.defaultCurrency === c ? "selected" : ""}>${c}</option>`).join("")}
+      </select>
+    </label>
+    <div class="row" style="margin-top:10px">
+      <label>USD → JPY
+        <input id="rateUSD" type="number" step="any" value="${escapeAttr(settings.rates.USD)}" />
+      </label>
+      <label>PHP → JPY
+        <input id="ratePHP" type="number" step="any" value="${escapeAttr(settings.rates.PHP)}" />
+      </label>
+    </div>
+    <h2 class="section-title">Expense categories</h2>
+    ${catEditor("expenseCategories")}
+    <h2 class="section-title">Income categories</h2>
+    ${catEditor("incomeCategories")}
+    <h2 class="section-title">Backup</h2>
+    <p class="hint">Data stays on this device. Export a copy before clearing the browser.</p>
+    <div class="footer-links">
+      <button class="ghost" id="backupBtn" type="button">Export backup</button>
+      <label class="file-btn ghost">Import backup<input id="importFile" type="file" accept="application/json" /></label>
+    </div>
+    ${tabbar("settings")}
+  `;
+}
+
+function catEditor(key) {
+  return `<ul class="edit-list">${settings[key]
+    .map(
+      (row, index) => `<li>
+        <input data-cat-key="${key}" data-cat-index="${index}" value="${escapeAttr(row.label)}" />
+        <button class="danger compact" data-del-cat="${key}:${index}" type="button">Remove</button>
+      </li>`
+    )
+    .join("")}</ul>
+    <div class="add-row">
+      <input id="new-${key}" placeholder="New category" />
+      <button class="chip" data-add-cat="${key}" type="button">Add</button>
+    </div>`;
+}
+
+function formData(form) {
+  return Object.fromEntries(new FormData(form).entries());
+}
+
+async function applyChanges(changes) {
+  for (const { id, delta } of changes) {
+    const asset = await getAsset(id);
+    if (!asset) continue;
+    await saveAsset({
+      ...asset,
+      value: (Number(asset.value) || 0) + delta,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+}
+
+function deltaFor(asset, kind, amount) {
+  if (!asset) return 0;
+  if (kind === "payment") return isLiability(asset) ? amount : -amount;
+  if (kind === "deposit") return isLiability(asset) ? -amount : amount;
+  return 0;
+}
+
+async function computeEffect(kind, data, amount) {
+  const assets = await listAssets();
+  const from = assets.find((row) => row.id === data.assetId);
+  const to = assets.find((row) => row.id === data.toAssetId);
+  if (kind === "adjust" && from) {
+    return [{ id: from.id, delta: amount - (Number(from.value) || 0) }];
+  }
+  if (kind === "transfer" && from && to) {
+    return [
+      { id: from.id, delta: deltaFor(from, "payment", amount) },
+      { id: to.id, delta: deltaFor(to, "deposit", amount) },
+    ];
+  }
+  if ((kind === "payment" || kind === "deposit") && from) {
+    return [{ id: from.id, delta: deltaFor(from, kind, amount) }];
+  }
+  return [];
+}
+
+async function persistSettings() {
+  await saveSettings(settings);
+  applyTheme(settings.theme);
+}
+
+async function afterSave(hash) {
+  await reload();
+  go(hash);
+}
+
+function setTxType(kind) {
+  const form = app.querySelector("#txForm");
+  if (!form) return;
+  form.dataset.kind = kind;
+  for (const chip of form.querySelectorAll("[data-pick-type]")) {
+    chip.classList.toggle("active", chip.dataset.pickType === kind);
+  }
+  form.querySelector("#categoryField")?.classList.toggle("hidden", kind === "transfer" || kind === "adjust");
+  form.querySelector("#toField")?.classList.toggle("hidden", kind !== "transfer");
+  const assetLabel = form.querySelector("#assetField");
+  if (assetLabel) assetLabel.childNodes[0].textContent = kind === "transfer" ? "From" : "Account";
+  const select = form.querySelector("[name=category]");
+  if (select && kind !== "transfer" && kind !== "adjust") {
+    const cats = kind === "deposit" ? settings.incomeCategories : settings.expenseCategories;
+    select.innerHTML = cats.map((cat) => `<option value="${cat.id}">${escapeHtml(cat.label)}</option>`).join("");
+  }
+}
+
+function updateAccountTypeUi() {
+  const type = app.querySelector("#accountType")?.value;
+  const due = app.querySelector("#dueField");
+  const label = app.querySelector("#balanceLabel");
+  if (due) due.classList.toggle("hidden", type !== "bill");
+  if (label) label.childNodes[0].textContent = type === "bill" || type === "credit-card" ? "Amount due" : "Current balance";
 }
 
 async function route() {
-  const r = parseHash();
+  const r = parseRoute();
+  if (r.name === "account-form") return renderAccountForm(r.id);
+  if (r.name === "activity") return renderActivity();
+  if (r.name === "tx-form") return renderTxForm(r.id);
+  if (r.name === "report") return renderReport();
   if (r.name === "settings") return renderSettings();
-  if (r.name === "detail") return renderDetail(r.id);
-  if (r.name === "form") return renderForm(r.id);
-  return renderHome();
+  return renderAccounts();
 }
 
-app.addEventListener("click", (e) => {
-  const themePick = e.target.closest("[data-theme-pick]")?.dataset.themePick;
-  if (themePick) {
-    e.preventDefault();
-    applyTheme(themePick);
-    persistCatalog();
-    renderSettings();
-    return;
-  }
+app.addEventListener("click", async (e) => {
   const goTo = e.target.closest("[data-go]")?.dataset.go;
   if (goTo) {
     e.preventDefault();
     go(goTo);
-  }
-  const filter = e.target.closest("[data-filter]")?.dataset.filter;
-  if (filter) {
-    e.preventDefault();
-    homeState.filter = filter;
-    renderHome();
-  }
-  const cloneId = e.target.closest("[data-clone]")?.dataset.clone;
-  if (cloneId) {
-    e.preventDefault();
-    clonePlant(cloneId);
-  }
-});
-
-app.addEventListener("click", async (e) => {
-  if (e.target.id === "selectToggle") {
-    homeState.selectMode = !homeState.selectMode;
-    if (!homeState.selectMode) homeState.selected.clear();
-    renderHome();
     return;
   }
-  const quickWater = e.target.closest("[data-quick-water]")?.dataset.quickWater;
-  if (quickWater) {
+  if (e.target.id === "prevMonth") {
+    ui.month = shiftMonth(ui.month, -1);
+    route();
+    return;
+  }
+  if (e.target.id === "nextMonth") {
+    ui.month = shiftMonth(ui.month, 1);
+    route();
+    return;
+  }
+  const theme = e.target.closest("[data-theme-pick]")?.dataset.themePick;
+  if (theme) {
+    applyTheme(theme);
+    await persistSettings();
+    renderSettings();
+    return;
+  }
+  const pickType = e.target.closest("[data-pick-type]")?.dataset.pickType;
+  if (pickType) {
     e.preventDefault();
-    const plant = await getPlant(quickWater);
-    if (plant) {
-      await markCare(plant, "water");
-      await renderHome();
+    setTxType(pickType);
+    return;
+  }
+  const txType = e.target.closest("[data-tx-type]")?.dataset.txType;
+  if (txType) {
+    ui.txType = txType;
+    renderActivity();
+    return;
+  }
+  const reportKind = e.target.closest("[data-report-kind]")?.dataset.reportKind;
+  if (reportKind) {
+    ui.reportKind = reportKind;
+    renderReport();
+    return;
+  }
+  const addCat = e.target.closest("[data-add-cat]")?.dataset.addCat;
+  if (addCat) {
+    const label = app.querySelector(`#new-${addCat}`)?.value.trim();
+    if (!label) return;
+    const id = `${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Math.floor(Math.random() * 99)}`;
+    settings[addCat].push({ id, label });
+    await persistSettings();
+    renderSettings();
+    return;
+  }
+  const delCat = e.target.closest("[data-del-cat]")?.dataset.delCat;
+  if (delCat) {
+    const [key, index] = delCat.split(":");
+    settings[key].splice(Number(index), 1);
+    await persistSettings();
+    renderSettings();
+    return;
+  }
+  if (e.target.id === "deleteAccount") {
+    if (!confirm("Delete this account?")) return;
+    const id = parseRoute().id;
+    await deleteAsset(id);
+    await afterSave("#/");
+    return;
+  }
+  if (e.target.id === "deleteTx") {
+    if (!confirm("Delete this transaction?")) return;
+    const id = parseRoute().id;
+    const row = await getTransaction(id);
+    if (row?.effect?.changes) await applyChanges(row.effect.changes.map((c) => ({ id: c.id, delta: -c.delta })));
+    await deleteTransaction(id);
+    await afterSave("#/activity");
+    return;
+  }
+  if (e.target.id === "backupBtn") {
+    const data = await exportAll();
+    downloadFile(`bochog-kakei-backup-${today()}.json`, JSON.stringify(data, null, 2), "application/json");
+    return;
+  }
+  if (e.target.id === "csvBtn" || e.target.id === "excelBtn" || e.target.id === "pdfBtn") {
+    const headers = ["Date", "Name", "Category", "Account", "Amount", "Currency"];
+    const rows = reportRows();
+    const name = `bochog-kakei-${ui.reportKind}-${today()}`;
+    if (e.target.id === "csvBtn") downloadFile(`${name}.csv`, toCsv(headers, rows), "text/csv");
+    if (e.target.id === "excelBtn") downloadFile(`${name}.xls`, toExcelXml("Report", headers, rows), "application/vnd.ms-excel");
+    if (e.target.id === "pdfBtn") {
+      const table = `<h1>Bochog Kakei</h1><p>${ui.reportKind} · ${monthLabel(ui.month)}</p><table><tr>${headers
+        .map((h) => `<th>${h}</th>`)
+        .join("")}</tr>${rows.map((row) => `<tr>${row.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("")}</table>`;
+      printReport("Bochog Kakei report", table);
     }
-    return;
-  }
-  if (e.target.id === "clearSelect") {
-    homeState.selected.clear();
-    renderHome();
-    return;
-  }
-  if (e.target.id === "batchWater" || e.target.id === "batchMist") {
-    const type = e.target.id === "batchWater" ? "water" : "mist";
-    const ids = [...homeState.selected];
-    for (const id of ids) {
-      const plant = await getPlant(id);
-      if (plant) await markCare(plant, type);
-    }
-    homeState.selected.clear();
-    homeState.selectMode = false;
-    renderHome();
-    return;
-  }
-  const care = e.target.closest("[data-care]")?.dataset.care;
-  if (care) {
-    const id = parseHash().id;
-    const plant = await getPlant(id);
-    if (!plant) return;
-    await markCare(plant, care);
-    renderDetail(id);
-    return;
-  }
-  if (e.target.id === "addLocation") {
-    const input = app.querySelector("#newLocation");
-    const name = input?.value.trim();
-    if (!name) return;
-    if (LOCATIONS.some((loc) => loc.toLowerCase() === name.toLowerCase())) return;
-    LOCATIONS.push(name);
-    await persistCatalog();
-    renderSettings();
-    return;
-  }
-  if (e.target.id === "addType") {
-    const name = app.querySelector("#newTypeName")?.value.trim();
-    const category = app.querySelector("#newTypeCategory")?.value.trim() || "";
-    if (!name) return;
-    const key = slugify(name);
-    PRESETS[key] = {
-      label: name,
-      category,
-      light: "medium",
-      waterEveryDays: 7,
-      mistEveryDays: 0,
-      fertilizeEveryDays: 30,
-      repotEveryMonths: 12,
-    };
-    await persistCatalog();
-    renderSettings();
-    return;
-  }
-  const delLoc = e.target.closest("[data-del-loc]")?.dataset.delLoc;
-  if (delLoc !== undefined) {
-    const index = Number(delLoc);
-    const removed = LOCATIONS[index];
-    if (!confirm(`Delete location “${removed}”? Plants keep their current room until you edit them.`)) return;
-    LOCATIONS.splice(index, 1);
-    if (homeState.location === removed) homeState.location = "all";
-    await persistCatalog();
-    renderSettings();
-    return;
-  }
-  const delType = e.target.closest("[data-del-type]")?.dataset.delType;
-  if (delType) {
-    const label = PRESETS[delType]?.label || delType;
-    if (!confirm(`Delete “${label}” from the plant name list?`)) return;
-    delete PRESETS[delType];
-    if (homeState.plantType === delType) homeState.plantType = "all";
-    await persistCatalog();
-    renderSettings();
-    return;
-  }
-  if (e.target.id === "exportBtn") {
-    const data = await exportData();
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `bochog-backup-${todayIso()}.json`;
-    a.click();
   }
 });
 
 app.addEventListener("change", async (e) => {
-  if (e.target.dataset.locIndex !== undefined) {
-    const index = Number(e.target.dataset.locIndex);
-    const next = e.target.value.trim();
-    const prev = LOCATIONS[index];
-    if (!next || next === prev) {
-      e.target.value = prev;
-      return;
-    }
-    const plants = await listPlants();
-    for (const plant of plants) {
-      if (plant.location === prev) {
-        plant.location = next;
-        await savePlant(plant);
-      }
-    }
-    LOCATIONS[index] = next;
-    if (homeState.location === prev) homeState.location = next;
-    await persistCatalog();
+  if (e.target.id === "accountType") {
+    updateAccountTypeUi();
     return;
   }
-  if (e.target.dataset.typeLabel) {
-    const key = e.target.dataset.typeLabel;
-    const next = e.target.value.trim();
-    if (!next || !PRESETS[key]) {
-      e.target.value = PRESETS[key]?.label || "";
-      return;
-    }
-    PRESETS[key].label = next;
-    await persistCatalog();
+  if (e.target.id === "defaultCurrency") {
+    settings.defaultCurrency = e.target.value;
+    await persistSettings();
     return;
   }
-  if (e.target.dataset.typeCat) {
-    const key = e.target.dataset.typeCat;
-    if (!PRESETS[key]) return;
-    PRESETS[key].category = e.target.value;
-    await persistCatalog();
+  if (e.target.id === "rateUSD" || e.target.id === "ratePHP") {
+    settings.rates.USD = Number(app.querySelector("#rateUSD").value) || settings.rates.USD;
+    settings.rates.PHP = Number(app.querySelector("#ratePHP").value) || settings.rates.PHP;
+    await persistSettings();
     return;
   }
-  if (e.target.id === "locJump") {
-    settingsState.locQuery = e.target.value;
-    renderSettings();
-    return;
-  }
-  if (e.target.id === "typeJump") {
-    const preset = PRESETS[e.target.value];
-    settingsState.typeQuery = preset ? preset.label : "";
-    renderSettings();
-    return;
-  }
-  if (e.target.id === "locationFilter") {
-    homeState.location = e.target.value;
-    renderHome();
-    return;
-  }
-  if (e.target.id === "typeFilter") {
-    homeState.plantType = e.target.value;
-    renderHome();
-    return;
-  }
-  if (e.target.dataset.select) {
-    if (e.target.checked) homeState.selected.add(e.target.dataset.select);
-    else homeState.selected.delete(e.target.dataset.select);
-    renderHome();
+  if (e.target.dataset.catKey) {
+    const key = e.target.dataset.catKey;
+    const index = Number(e.target.dataset.catIndex);
+    const label = e.target.value.trim();
+    if (!label) return;
+    settings[key][index].label = label;
+    await persistSettings();
     return;
   }
   if (e.target.id !== "importFile") return;
   const file = e.target.files?.[0];
   if (!file) return;
-  if (!confirm("Import will replace plants on this device. Continue?")) return;
-  const payload = JSON.parse(await file.text());
-  await importData(payload);
-  applyConfig(payload.config || (await getConfig()));
-  photoUrls.clear();
+  if (!confirm("Import will replace data on this device. Continue?")) return;
+  await importAll(JSON.parse(await file.text()));
+  await reload();
   go("#/");
-  route();
 });
 
 app.addEventListener("input", (e) => {
   const start = e.target.selectionStart;
-  if (e.target.id === "search") {
-    homeState.query = e.target.value;
-    renderHome().then(() => restoreCaret("search", start));
+  if (e.target.id === "txSearch") {
+    ui.txQuery = e.target.value;
+    renderActivity().then(() => restoreCaret("txSearch", start));
+  }
+});
+
+app.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (e.target.id === "accountForm") {
+    const data = formData(e.target);
+    const existing = parseRoute().id ? await getAsset(parseRoute().id) : null;
+    const cat = catMeta(data.category);
+    await saveAsset({
+      id: existing?.id || uid(),
+      name: data.name.trim(),
+      category: data.category,
+      value: Number(data.value) || 0,
+      currency: data.currency,
+      notes: data.notes || "",
+      dueDate: data.category === "bill" ? data.dueDate || "" : "",
+      liability: Boolean(cat.liability),
+      createdAt: existing?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    await afterSave("#/");
     return;
   }
-  if (e.target.id === "locSearch") {
-    settingsState.locQuery = e.target.value;
-    renderSettings().then(() => restoreCaret("locSearch", start));
-    return;
-  }
-  if (e.target.id === "typeSearch") {
-    settingsState.typeQuery = e.target.value;
-    renderSettings().then(() => restoreCaret("typeSearch", start));
+  if (e.target.id === "txForm") {
+    const data = formData(e.target);
+    const kind = e.target.dataset.kind || "payment";
+    const existing = parseRoute().id ? await getTransaction(parseRoute().id) : null;
+    if (existing?.effect?.changes) {
+      await applyChanges(existing.effect.changes.map((c) => ({ id: c.id, delta: -c.delta })));
+    }
+    const amount = Number(data.amount) || 0;
+    if (kind === "transfer" && (!data.assetId || !data.toAssetId || data.assetId === data.toAssetId)) {
+      alert("Choose two different accounts for a transfer.");
+      return;
+    }
+    const changes = await computeEffect(kind, data, amount);
+    await applyChanges(changes);
+    await saveTransaction({
+      id: existing?.id || uid(),
+      type: kind,
+      name: data.name.trim(),
+      amount,
+      currency: data.currency,
+      date: data.date,
+      category: data.category || "",
+      assetId: data.assetId || "",
+      toAssetId: kind === "transfer" ? data.toAssetId || "" : "",
+      notes: data.notes || "",
+      effect: { changes },
+      createdAt: existing?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    await afterSave("#/activity");
   }
 });
 
@@ -1167,12 +872,9 @@ window.addEventListener("hashchange", route);
 
 async function boot() {
   applyTheme(localStorage.getItem("bochog-theme") || "light");
-  try {
-    applyConfig(await getConfig());
-    await persistCatalog();
-  } catch (error) {
-    console.error("Could not load settings", error);
-  }
+  await reload();
+  await saveSettings(settings);
+  await reload();
   route();
 }
 

@@ -173,6 +173,17 @@ label {
   gap: 10px;
 }
 
+.type-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.type-grid .chip {
+  padding: 10px 14px;
+  font-size: 15px;
+}
+
 .hero, .card, .empty, .panel {
   background: var(--card);
   border-radius: var(--radius);

@@ -134,11 +134,19 @@ function isLiability(asset) {
   return Boolean(asset?.liability || cat.liability || cat.group === "out");
 }
 
+function isDueType(type) {
+  return type === "bill" || type === "insurance";
+}
+
+function isAmountDueType(type) {
+  return type === "credit-card" || type === "bill" || type === "insurance";
+}
+
 function groupOf(asset) {
   const cat = catMeta(asset.category);
   if (cat.group === "in" || cat.group === "out") return cat.group;
   if (["cash", "bank", "savings"].includes(asset.category)) return "in";
-  if (["credit-card", "bill"].includes(asset.category) || isLiability(asset)) return "out";
+  if (["credit-card", "bill", "insurance"].includes(asset.category) || isLiability(asset)) return "out";
   return "other";
 }
 
@@ -265,7 +273,10 @@ async function renderAccounts() {
   const now = moneyNow();
   const cash = cache.assets.filter((row) => groupOf(row) === "in").sort(byName);
   const cards = cache.assets.filter((row) => row.category === "credit-card").sort(byName);
-  const bills = cache.assets.filter((row) => row.category === "bill" || (groupOf(row) === "out" && row.category !== "credit-card")).sort(byDue);
+  const insurance = cache.assets.filter((row) => row.category === "insurance").sort(byDue);
+  const bills = cache.assets
+    .filter((row) => row.category === "bill" || (groupOf(row) === "out" && row.category !== "credit-card" && row.category !== "insurance"))
+    .sort(byDue);
   app.innerHTML = `
     <header class="top">
       <div class="brand">
@@ -296,6 +307,7 @@ async function renderAccounts() {
       cache.assets.length
         ? `${sectionList("Cash & banks", cash)}
            ${sectionList("Credit cards", cards)}
+           ${sectionList("Insurance", insurance)}
            ${sectionList("Bills due", bills)}`
         : `<div class="empty">
             <h2>Start with balances</h2>
@@ -317,7 +329,7 @@ function byDue(a, b) {
 
 async function renderAccountForm(id) {
   const row = id ? await getAsset(id) : null;
-  const isBill = (row?.category || "bank") === "bill";
+  const selectedType = row?.category || "bank";
   app.innerHTML = `
     <div class="form-top">
       <button class="ghost" data-go="#/">Back</button>
@@ -328,27 +340,26 @@ async function renderAccountForm(id) {
       <label>Name
         <input name="name" required value="${escapeAttr(row?.name || "")}" placeholder="MUFG, cash wallet, Tokyo Gas…" />
       </label>
-      <div class="row">
-        <label>Type
-          <select name="category" id="accountType">
-            ${settings.assetCategories
-              .map(
-                (cat) =>
-                  `<option value="${cat.id}" ${ (row?.category || "bank") === cat.id ? "selected" : "" }>${escapeHtml(cat.label)}</option>`
-              )
-              .join("")}
-          </select>
-        </label>
-        <label>Currency
-          <select name="currency">
-            ${CURRENCIES.map((c) => `<option ${ (row?.currency || settings.defaultCurrency) === c ? "selected" : "" }>${c}</option>`).join("")}
-          </select>
-        </label>
-      </div>
-      <label id="balanceLabel">${isBill || row?.category === "credit-card" ? "Amount due" : "Current balance"}
+      <label>Type
+        <input type="hidden" name="category" id="accountType" value="${escapeAttr(selectedType)}" />
+        <div class="type-grid">
+          ${settings.assetCategories
+            .map(
+              (cat) =>
+                `<button type="button" class="chip ${selectedType === cat.id ? "active" : ""}" data-account-type="${cat.id}">${escapeHtml(cat.label)}</button>`
+            )
+            .join("")}
+        </div>
+      </label>
+      <label>Currency
+        <select name="currency">
+          ${CURRENCIES.map((c) => `<option ${ (row?.currency || settings.defaultCurrency) === c ? "selected" : "" }>${c}</option>`).join("")}
+        </select>
+      </label>
+      <label id="balanceLabel">${isAmountDueType(selectedType) ? "Amount due" : "Current balance"}
         <input name="value" type="number" step="any" required value="${escapeAttr(row?.value ?? "")}" />
       </label>
-      <label id="dueField" class="${isBill ? "" : "hidden"}">Due date
+      <label id="dueField" class="${isDueType(selectedType) ? "" : "hidden"}">Due date
         <input name="dueDate" type="date" value="${escapeAttr(row?.dueDate || "")}" />
       </label>
       <label>Notes
@@ -655,8 +666,8 @@ function updateAccountTypeUi() {
   const type = app.querySelector("#accountType")?.value;
   const due = app.querySelector("#dueField");
   const label = app.querySelector("#balanceLabel");
-  if (due) due.classList.toggle("hidden", type !== "bill");
-  if (label) label.childNodes[0].textContent = type === "bill" || type === "credit-card" ? "Amount due" : "Current balance";
+  if (due) due.classList.toggle("hidden", !isDueType(type));
+  if (label) label.childNodes[0].textContent = isAmountDueType(type) ? "Amount due" : "Current balance";
 }
 
 async function route() {
@@ -697,6 +708,17 @@ app.addEventListener("click", async (e) => {
   if (pickType) {
     e.preventDefault();
     setTxType(pickType);
+    return;
+  }
+  const accountType = e.target.closest("[data-account-type]")?.dataset.accountType;
+  if (accountType) {
+    e.preventDefault();
+    const input = app.querySelector("#accountType");
+    if (input) input.value = accountType;
+    for (const chip of app.querySelectorAll("[data-account-type]")) {
+      chip.classList.toggle("active", chip.dataset.accountType === accountType);
+    }
+    updateAccountTypeUi();
     return;
   }
   const txType = e.target.closest("[data-tx-type]")?.dataset.txType;
@@ -820,7 +842,7 @@ app.addEventListener("submit", async (e) => {
       value: Number(data.value) || 0,
       currency: data.currency,
       notes: data.notes || "",
-      dueDate: data.category === "bill" ? data.dueDate || "" : "",
+      dueDate: isDueType(data.category) ? data.dueDate || "" : "",
       liability: Boolean(cat.liability),
       createdAt: existing?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),

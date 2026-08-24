@@ -32,6 +32,7 @@ export const DEFAULT_SETTINGS = {
     { id: "savings", label: "Savings", liability: false, group: "in" },
     { id: "credit-card", label: "Credit card", liability: true, group: "out" },
     { id: "bill", label: "Bill due", liability: true, group: "out" },
+    { id: "insurance", label: "Insurance", liability: true, group: "out" },
   ],
 };
 

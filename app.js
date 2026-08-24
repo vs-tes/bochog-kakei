@@ -24,6 +24,19 @@ const TX_TYPES = [
   { id: "transfer", label: "Transfer", sign: "−" },
 ];
 
+const TYPE_ICONS = {
+  cash: "💴",
+  bank: "🏦",
+  savings: "💰",
+  "credit-card": "💳",
+  loan: "📝",
+  insurance: "🛡️",
+  utilities: "💡",
+  tithes: "🙏",
+  investments: "📈",
+  custom: "✦",
+};
+
 function today() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -116,6 +129,29 @@ function formatMoney(amount, currency = settings.defaultCurrency) {
   })}`;
 }
 
+function typeIcon(id) {
+  return TYPE_ICONS[normalizeCategory(id)] || "✦";
+}
+
+function dueAmount(row) {
+  const n = Number(row?.value) || 0;
+  return groupOf(row) === "out" ? Math.abs(n) : n;
+}
+
+function moneyBlock(amount, currency, cls = "", sign = "") {
+  const n = Number(amount) || 0;
+  const converted = currency && currency !== settings.defaultCurrency;
+  return `<span class="money">
+      <strong class="amount ${cls}">${sign}${formatMoney(n, currency)}</strong>
+      ${converted ? `<small class="fx">= ${sign}${formatMoney(toDefault(n, currency))}</small>` : ""}
+    </span>`;
+}
+
+function fxHintHtml(amount, currency) {
+  if (!currency || currency === settings.defaultCurrency) return "";
+  return `${formatMoney(amount, currency)} = ${formatMoney(toDefault(amount, currency))}`;
+}
+
 function toDefault(amount, currency) {
   const rates = settings.rates || DEFAULT_SETTINGS.rates;
   const from = rates[currency] || 1;
@@ -206,11 +242,38 @@ function isDeduction(kind) {
   return kind === "payment" || kind === "transfer";
 }
 
+function isOutgoingAccount(asset) {
+  return Boolean(asset) && groupOf(asset) === "out";
+}
+
+function accountDelta(kind, asset, amount, role = "from") {
+  if (!asset) return 0;
+  const outgoing = isOutgoingAccount(asset);
+  if (kind === "payment") return outgoing ? amount : -amount;
+  if (kind === "deposit" || kind === "adjust") return outgoing ? -amount : amount;
+  if (kind === "transfer") {
+    if (role === "from") return -amount;
+    return outgoing ? -amount : amount;
+  }
+  return 0;
+}
+
+function nextValue(asset, delta) {
+  const next = (Number(asset.value) || 0) + delta;
+  return isOutgoingAccount(asset) ? Math.max(0, next) : next;
+}
+
 async function reload() {
   const [assets, txs, nextSettings] = await Promise.all([listAssets(), listTransactions(), getSettings()]);
   cache = { assets, txs };
   settings = nextSettings;
   applyTheme(settings.theme);
+  for (const row of cache.assets) {
+    if (isOutgoingAccount(row) && Number(row.value) < 0) {
+      row.value = Math.abs(Number(row.value));
+      await saveAsset({ ...row, updatedAt: new Date().toISOString() });
+    }
+  }
 }
 
 function moneyNow() {
@@ -218,7 +281,7 @@ function moneyNow() {
   let cards = 0;
   let bills = 0;
   for (const row of cache.assets) {
-    const value = toDefault(row.value, row.currency);
+    const value = toDefault(dueAmount(row), row.currency);
     const group = groupOf(row);
     const id = normalizeCategory(row.category);
     if (group === "in") inBanks += value;
@@ -309,7 +372,12 @@ function txCard(row, accountId) {
   const meta = txMeta(kind);
   const from = cache.assets.find((item) => item.id === row.assetId);
   const to = cache.assets.find((item) => item.id === row.toAssetId);
-  const outgoing = kind === "transfer" ? row.assetId === accountId : isDeduction(kind);
+  const account = cache.assets.find((item) => item.id === accountId) || from;
+  const outgoing = kind === "transfer"
+    ? row.assetId === accountId
+    : isOutgoingAccount(account)
+      ? kind === "deposit"
+      : isDeduction(kind);
   const cls = outgoing ? "out" : "in";
   const sign = outgoing ? "−" : "+";
   const href = accountId ? `#/account/${accountId}/tx/${row.id}` : `#/activity/${row.id}`;
@@ -323,7 +391,7 @@ function txCard(row, accountId) {
         <h3>${escapeHtml(row.name || meta.label)}</h3>
         <p class="when">${prettyDate(row.date)} · ${escapeHtml(meta.label)} · ${escapeHtml(where)}</p>
       </div>
-      <strong class="amount ${cls}">${sign}${formatMoney(row.amount, row.currency)}</strong>
+      ${moneyBlock(row.amount, row.currency, cls, sign)}
     </a>
   </article>`;
 }
@@ -332,12 +400,13 @@ function accountCard(row) {
   const due = row.dueDate ? ` · due ${prettyDate(row.dueDate)}` : "";
   const cls = groupOf(row) === "out" ? "out" : groupOf(row) === "in" ? "in" : "";
   return `<article class="card">
-    <a class="card-main" href="#/account/${row.id}">
+    <a class="card-main has-icon" href="#/account/${row.id}">
+      <span class="type-icon" aria-hidden="true">${typeIcon(row.category)}</span>
       <div class="meta">
         <h3>${escapeHtml(row.name)}</h3>
         <p class="when">${escapeHtml(typeLabel(row))}${due}</p>
       </div>
-      <strong class="amount ${cls}">${formatMoney(row.value, row.currency)}</strong>
+      ${moneyBlock(dueAmount(row), row.currency, cls)}
     </a>
   </article>`;
 }
@@ -421,9 +490,9 @@ async function renderAccount(id) {
       <button class="ghost" data-go="#/account/${row.id}/edit">Edit</button>
     </div>
     <section class="hero">
-      <p class="eyebrow">${escapeHtml(typeLabel(row))}</p>
+      <p class="eyebrow"><span class="type-icon">${typeIcon(row.category)}</span> ${escapeHtml(typeLabel(row))}</p>
       <h1>${escapeHtml(row.name)}</h1>
-      <p class="hero-amount ${cls === "out" ? "amount out" : ""}">${formatMoney(row.value, row.currency)}</p>
+      <div class="hero-amount ${cls === "out" ? "amount out" : ""}">${moneyBlock(dueAmount(row), row.currency, cls)}</div>
       ${row.dueDate ? `<p class="hint">Due ${prettyDate(row.dueDate)}</p>` : ""}
     </section>
     <header class="top">
@@ -461,7 +530,7 @@ async function renderAccountForm(id) {
           ${settings.assetCategories
             .map(
               (cat) =>
-                `<option value="${cat.id}" ${selectedType === cat.id ? "selected" : ""}>${escapeHtml(cat.label)}</option>`
+                `<option value="${cat.id}" ${selectedType === cat.id ? "selected" : ""}>${typeIcon(cat.id)} ${escapeHtml(cat.label)}</option>`
             )
             .join("")}
         </select>
@@ -472,8 +541,9 @@ async function renderAccountForm(id) {
         </select>
       </label>
       <label id="balanceLabel">${isAmountDueType(selectedType) ? "Amount due" : "Current balance"}
-        <input name="value" type="number" step="any" required value="${escapeAttr(row?.value ?? "")}" />
+        <input name="value" type="number" step="any" required value="${escapeAttr(dueAmount(row || { value: 0, category: selectedType }))}" />
       </label>
+      <p class="fx-hint" id="fxHint"></p>
       <label id="dueField" class="${isDueType(selectedType) ? "" : "hidden"}">Due date
         <input name="dueDate" type="date" value="${escapeAttr(row?.dueDate || "")}" />
       </label>
@@ -487,6 +557,7 @@ async function renderAccountForm(id) {
     </form>
     ${tabbar("accounts")}
   `;
+  updateFxHint();
 }
 
 async function renderActivity() {
@@ -553,6 +624,7 @@ async function renderTxForm(id, accountId) {
       <label>Amount
         <input name="amount" type="number" step="any" required value="${escapeAttr(row?.amount ?? "")}" />
       </label>
+      <p class="fx-hint" id="fxHint"></p>
       <div class="row">
         <label>Currency
           <select name="currency">
@@ -578,6 +650,8 @@ async function renderTxForm(id, accountId) {
     </form>
     ${tabbar(accountId ? "accounts" : "activity")}
   `;
+  setTxType(kind);
+  updateFxHint();
 }
 
 async function renderReport() {
@@ -700,7 +774,7 @@ async function applyChanges(changes) {
     if (!asset) continue;
     await saveAsset({
       ...asset,
-      value: (Number(asset.value) || 0) + delta,
+      value: nextValue(asset, delta),
       updatedAt: new Date().toISOString(),
     });
   }
@@ -710,16 +784,13 @@ async function computeEffect(kind, data, amount) {
   const assets = await listAssets();
   const from = assets.find((row) => row.id === data.assetId);
   const to = assets.find((row) => row.id === data.toAssetId);
-  if ((kind === "deposit" || kind === "adjust") && from) {
-    return [{ id: from.id, delta: amount }];
-  }
-  if (kind === "payment" && from) {
-    return [{ id: from.id, delta: -amount }];
+  if ((kind === "deposit" || kind === "adjust" || kind === "payment") && from) {
+    return [{ id: from.id, delta: accountDelta(kind, from, amount) }];
   }
   if (kind === "transfer" && from && to) {
     return [
-      { id: from.id, delta: -amount },
-      { id: to.id, delta: amount },
+      { id: from.id, delta: accountDelta(kind, from, amount, "from") },
+      { id: to.id, delta: accountDelta(kind, to, amount, "to") },
     ];
   }
   return [];
@@ -739,8 +810,21 @@ function setTxType(kind) {
   const form = app.querySelector("#txForm");
   if (!form) return;
   form.dataset.kind = kind;
+  const assetId = form.querySelector("[name=assetId]")?.value;
+  const asset = cache.assets.find((row) => row.id === assetId);
   const hint = app.querySelector("#txHint");
-  if (hint) hint.textContent = isDeduction(kind) ? "This subtracts from the account." : "This adds to the account.";
+  if (hint) {
+    if (kind === "transfer") {
+      hint.textContent = "Money leaves the From account. If To is a bill, loan, or utility, the amount due goes down.";
+    } else if (isOutgoingAccount(asset)) {
+      hint.textContent =
+        kind === "payment" || kind === "adjust"
+          ? "This adds to the amount due (coming out of savings)."
+          : "This reduces the amount due (you paid it).";
+    } else {
+      hint.textContent = isDeduction(kind) ? "This subtracts from the account." : "This adds to the account.";
+    }
+  }
   form.querySelector("#categoryField")?.classList.toggle("hidden", kind === "transfer");
   form.querySelector("#toField")?.classList.toggle("hidden", kind !== "transfer");
   const assetLabel = form.querySelector("#assetField");
@@ -752,6 +836,19 @@ function setTxType(kind) {
   }
 }
 
+function updateFxHint() {
+  const hint = app.querySelector("#fxHint");
+  if (!hint) return;
+  const form = app.querySelector("#accountForm, #txForm");
+  if (!form) {
+    hint.textContent = "";
+    return;
+  }
+  const currency = form.querySelector("[name=currency]")?.value;
+  const amount = Number(form.querySelector("[name=value], [name=amount]")?.value) || 0;
+  hint.textContent = fxHintHtml(amount, currency);
+}
+
 function updateAccountTypeUi() {
   const type = app.querySelector("#accountType")?.value;
   const due = app.querySelector("#dueField");
@@ -760,6 +857,7 @@ function updateAccountTypeUi() {
   if (due) due.classList.toggle("hidden", !isDueType(type));
   if (custom) custom.classList.toggle("hidden", type !== "custom");
   if (label) label.childNodes[0].textContent = isAmountDueType(type) ? "Amount due" : "Current balance";
+  updateFxHint();
 }
 
 async function route() {
@@ -872,6 +970,14 @@ app.addEventListener("change", async (e) => {
     setTxType(e.target.value);
     return;
   }
+  if (e.target.name === "assetId" && app.querySelector("#txForm")) {
+    setTxType(app.querySelector("#txType")?.value || "payment");
+    return;
+  }
+  if (e.target.name === "currency" || e.target.name === "value" || e.target.name === "amount") {
+    updateFxHint();
+    return;
+  }
   if (e.target.id === "defaultCurrency") {
     settings.defaultCurrency = e.target.value;
     await persistSettings();
@@ -902,6 +1008,9 @@ app.addEventListener("change", async (e) => {
 });
 
 app.addEventListener("input", (e) => {
+  if (e.target.name === "value" || e.target.name === "amount" || e.target.name === "currency") {
+    updateFxHint();
+  }
   const start = e.target.selectionStart;
   if (e.target.id === "txSearch") {
     ui.txQuery = e.target.value;
@@ -920,7 +1029,7 @@ app.addEventListener("submit", async (e) => {
       id,
       name: data.name.trim(),
       category: normalizeCategory(data.category),
-      value: Number(data.value) || 0,
+      value: Math.abs(Number(data.value) || 0),
       currency: data.currency,
       notes: data.notes || "",
       customType: data.category === "custom" ? (data.customType || "").trim() : "",

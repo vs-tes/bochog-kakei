@@ -385,7 +385,7 @@ function txCard(row, accountId) {
     kind === "transfer"
       ? `${from?.name || "Account"} → ${to?.name || "Account"}`
       : from?.name || categoryLabel(kind === "deposit" ? "income" : "expense", row.category);
-  return `<article class="card">
+  return `<article class="card compact">
     <a class="card-main" href="${href}">
       <div class="meta">
         <h3>${escapeHtml(row.name || meta.label)}</h3>
@@ -399,12 +399,11 @@ function txCard(row, accountId) {
 function accountCard(row) {
   const due = row.dueDate ? ` · due ${prettyDate(row.dueDate)}` : "";
   const cls = groupOf(row) === "out" ? "out" : groupOf(row) === "in" ? "in" : "";
-  return `<article class="card">
-    <a class="card-main has-icon" href="#/account/${row.id}">
-      <span class="type-icon" aria-hidden="true">${typeIcon(row.category)}</span>
+  return `<article class="card compact">
+    <a class="card-main" href="#/account/${row.id}">
       <div class="meta">
         <h3>${escapeHtml(row.name)}</h3>
-        <p class="when">${escapeHtml(typeLabel(row))}${due}</p>
+        <p class="when"><span class="type-icon">${typeIcon(row.category)}</span> ${escapeHtml(typeLabel(row))}${due}</p>
       </div>
       ${moneyBlock(dueAmount(row), row.currency, cls)}
     </a>
@@ -455,7 +454,7 @@ async function renderAccounts() {
           <strong class="amount out">${formatMoney(now.comingOut)}</strong>
         </div>
       </div>
-      <p class="hint" style="margin-top:12px">Cash, bank, and savings minus credit cards, loans, utilities, insurance, and tithes.</p>
+      <p class="hint" style="margin-top:8px">Cash, bank, and savings minus credit cards, loans, utilities, insurance, and tithes.</p>
     </section>
     ${
       cache.assets.length

@@ -28,11 +28,16 @@ export const DEFAULT_SETTINGS = {
   ],
   assetCategories: [
     { id: "cash", label: "Cash", liability: false, group: "in" },
-    { id: "bank", label: "Bank", liability: false, group: "in" },
+    { id: "bank", label: "Bank accounts", liability: false, group: "in" },
     { id: "savings", label: "Savings", liability: false, group: "in" },
-    { id: "credit-card", label: "Credit card", liability: true, group: "out" },
-    { id: "bill", label: "Bill due", liability: true, group: "out" },
+    { id: "credit-card", label: "Credit cards", liability: true, group: "out" },
     { id: "insurance", label: "Insurance", liability: true, group: "out" },
+    { id: "bill", label: "Bill due", liability: true, group: "out" },
+    { id: "investments", label: "Investments", liability: false, group: "other" },
+    { id: "vehicles", label: "Vehicles", liability: false, group: "other" },
+    { id: "real-estate", label: "Real estate", liability: false, group: "other" },
+    { id: "personal", label: "Personal assets", liability: false, group: "other" },
+    { id: "custom", label: "Custom", liability: false, group: "other" },
   ],
 };
 
@@ -156,7 +161,7 @@ export async function getSettings() {
     rates: { ...DEFAULT_SETTINGS.rates, ...(row.rates || {}) },
     incomeCategories: mergeCategories(row.incomeCategories, DEFAULT_SETTINGS.incomeCategories),
     expenseCategories: mergeCategories(row.expenseCategories, DEFAULT_SETTINGS.expenseCategories),
-    assetCategories: mergeCategories(row.assetCategories, DEFAULT_SETTINGS.assetCategories),
+    assetCategories: DEFAULT_SETTINGS.assetCategories,
   };
 }
 

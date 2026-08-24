@@ -115,8 +115,24 @@ function toDefault(amount, currency) {
   return (Number(amount) || 0) * (from / to);
 }
 
+function normalizeCategory(id) {
+  return (
+    {
+      "bank-accounts": "bank",
+      "credit-cards": "credit-card",
+      investment: "investments",
+      vehicle: "vehicles",
+      vehicles: "vehicles",
+      realestate: "real-estate",
+      "personal-assets": "personal",
+      "custom-assets": "custom",
+    }[id] || id
+  );
+}
+
 function catMeta(id) {
-  return settings.assetCategories.find((item) => item.id === id) || { id, label: id, liability: false, group: "other" };
+  const key = normalizeCategory(id);
+  return settings.assetCategories.find((item) => item.id === key) || { id: key, label: id, liability: false, group: "other" };
 }
 
 function categoryLabel(kind, id) {
@@ -172,7 +188,7 @@ function moneyNow() {
     const value = toDefault(row.value, row.currency);
     const group = groupOf(row);
     if (group === "in") inBanks += value;
-    else if (row.category === "credit-card") cards += value;
+    else if (normalizeCategory(row.category) === "credit-card") cards += value;
     else if (group === "out") bills += value;
   }
   const comingOut = cards + bills;
@@ -250,13 +266,14 @@ function barChart(items, kind) {
 
 function accountCard(row) {
   const cat = catMeta(row.category);
+  const typeLabel = row.category === "custom" && row.customType ? row.customType : cat.label;
   const due = row.dueDate ? ` · due ${prettyDate(row.dueDate)}` : "";
-  const cls = groupOf(row) === "out" ? "out" : "in";
+  const cls = groupOf(row) === "out" ? "out" : groupOf(row) === "in" ? "in" : "";
   return `<article class="card">
     <a class="card-main" href="#/account/${row.id}">
       <div class="meta">
         <h3>${escapeHtml(row.name)}</h3>
-        <p class="when">${escapeHtml(cat.label)}${due}</p>
+        <p class="when">${escapeHtml(typeLabel)}${due}</p>
       </div>
       <strong class="amount ${cls}">${formatMoney(row.value, row.currency)}</strong>
     </a>
@@ -272,11 +289,15 @@ function sectionList(title, rows) {
 async function renderAccounts() {
   const now = moneyNow();
   const cash = cache.assets.filter((row) => groupOf(row) === "in").sort(byName);
-  const cards = cache.assets.filter((row) => row.category === "credit-card").sort(byName);
-  const insurance = cache.assets.filter((row) => row.category === "insurance").sort(byDue);
+  const cards = cache.assets.filter((row) => normalizeCategory(row.category) === "credit-card").sort(byName);
+  const insurance = cache.assets.filter((row) => normalizeCategory(row.category) === "insurance").sort(byDue);
   const bills = cache.assets
-    .filter((row) => row.category === "bill" || (groupOf(row) === "out" && row.category !== "credit-card" && row.category !== "insurance"))
+    .filter((row) => {
+      const id = normalizeCategory(row.category);
+      return id === "bill" || (groupOf(row) === "out" && id !== "credit-card" && id !== "insurance");
+    })
     .sort(byDue);
+  const other = cache.assets.filter((row) => groupOf(row) === "other").sort(byName);
   app.innerHTML = `
     <header class="top">
       <div class="brand">
@@ -308,7 +329,8 @@ async function renderAccounts() {
         ? `${sectionList("Cash & banks", cash)}
            ${sectionList("Credit cards", cards)}
            ${sectionList("Insurance", insurance)}
-           ${sectionList("Bills due", bills)}`
+           ${sectionList("Bills due", bills)}
+           ${sectionList("Other assets", other)}`
         : `<div class="empty">
             <h2>Start with balances</h2>
             <p>Add each bank or cash account, then add credit cards and bills (utilities, insurance). Current savings is banks minus those upcoming expenses.</p>
@@ -329,7 +351,7 @@ function byDue(a, b) {
 
 async function renderAccountForm(id) {
   const row = id ? await getAsset(id) : null;
-  const selectedType = row?.category || "bank";
+  const selectedType = normalizeCategory(row?.category || "bank");
   app.innerHTML = `
     <div class="form-top">
       <button class="ghost" data-go="#/">Back</button>
@@ -361,6 +383,9 @@ async function renderAccountForm(id) {
       </label>
       <label id="dueField" class="${isDueType(selectedType) ? "" : "hidden"}">Due date
         <input name="dueDate" type="date" value="${escapeAttr(row?.dueDate || "")}" />
+      </label>
+      <label id="customField" class="${selectedType === "custom" ? "" : "hidden"}">Custom type
+        <input name="customType" value="${escapeAttr(row?.customType || "")}" placeholder="e.g. Pension, crypto, gold…" />
       </label>
       <label>Notes
         <textarea name="notes">${escapeHtml(row?.notes || "")}</textarea>
@@ -665,8 +690,10 @@ function setTxType(kind) {
 function updateAccountTypeUi() {
   const type = app.querySelector("#accountType")?.value;
   const due = app.querySelector("#dueField");
+  const custom = app.querySelector("#customField");
   const label = app.querySelector("#balanceLabel");
   if (due) due.classList.toggle("hidden", !isDueType(type));
+  if (custom) custom.classList.toggle("hidden", type !== "custom");
   if (label) label.childNodes[0].textContent = isAmountDueType(type) ? "Amount due" : "Current balance";
 }
 
@@ -838,10 +865,11 @@ app.addEventListener("submit", async (e) => {
     await saveAsset({
       id: existing?.id || uid(),
       name: data.name.trim(),
-      category: data.category,
+      category: normalizeCategory(data.category),
       value: Number(data.value) || 0,
       currency: data.currency,
       notes: data.notes || "",
+      customType: data.category === "custom" ? (data.customType || "").trim() : "",
       dueDate: isDueType(data.category) ? data.dueDate || "" : "",
       liability: Boolean(cat.liability),
       createdAt: existing?.createdAt || new Date().toISOString(),

@@ -23,6 +23,7 @@ export const DEFAULT_SETTINGS = {
     { id: "healthcare", label: "Healthcare" },
     { id: "shopping", label: "Shopping" },
     { id: "travel", label: "Travel" },
+    { id: "schooling", label: "Schooling" },
     { id: "entertainment", label: "Entertainment" },
     { id: "other-expense", label: "Other" },
   ],
@@ -35,9 +36,16 @@ export const DEFAULT_SETTINGS = {
     { id: "insurance", label: "Insurance", liability: true, group: "out" },
     { id: "utilities", label: "Utilities", liability: true, group: "out" },
     { id: "tithes", label: "Tithes", liability: true, group: "out" },
+    { id: "travel", label: "Travel", liability: false, group: "other" },
+    { id: "healthcare", label: "Healthcare", liability: false, group: "other" },
+    { id: "schooling", label: "Schooling", liability: false, group: "other" },
     { id: "investments", label: "Investments", liability: false, group: "other" },
     { id: "custom", label: "Custom", liability: false, group: "other" },
   ],
+  autoRates: true,
+  ratesUpdatedAt: "",
+  ratesSource: "default",
+  collapsedGroups: {},
 };
 
 function openDb() {
@@ -126,6 +134,29 @@ export const deleteGoal = (id) => remove("goals", id);
 
 export const listSnapshots = () => all("snapshots");
 export const saveSnapshot = (row) => put("snapshots", row);
+export const deleteSnapshot = (id) => remove("snapshots", id);
+
+export async function saveAutoBackup() {
+  const data = await exportAll();
+  const slim = { ...data, attachments: [] };
+  await put("snapshots", {
+    id: `auto:${Date.now()}`,
+    createdAt: new Date().toISOString(),
+    payload: slim,
+  });
+  const autos = (await listSnapshots())
+    .filter((row) => String(row.id).startsWith("auto:"))
+    .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+  for (const row of autos.slice(7)) await deleteSnapshot(row.id);
+  return autos[0] || null;
+}
+
+export async function latestAutoBackup() {
+  const autos = (await listSnapshots())
+    .filter((row) => String(row.id).startsWith("auto:"))
+    .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+  return autos[0] || null;
+}
 
 export async function saveAttachment(id, blob, name, mime) {
   return put("attachments", { id, blob, name: name || "file", mime: mime || blob.type || "application/octet-stream" });
@@ -161,6 +192,7 @@ export async function getSettings() {
     incomeCategories: mergeCategories(row.incomeCategories, DEFAULT_SETTINGS.incomeCategories),
     expenseCategories: mergeCategories(row.expenseCategories, DEFAULT_SETTINGS.expenseCategories),
     assetCategories: DEFAULT_SETTINGS.assetCategories,
+    collapsedGroups: { ...DEFAULT_SETTINGS.collapsedGroups, ...(row.collapsedGroups || {}) },
   };
 }
 

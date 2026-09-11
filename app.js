@@ -8,9 +8,11 @@ import {
   getSettings,
   getTransaction,
   importAll,
+  latestAutoBackup,
   listAssets,
   listTransactions,
   saveAsset,
+  saveAutoBackup,
   saveSettings,
   saveTransaction,
 } from "./db.js";
@@ -33,9 +35,18 @@ const TYPE_ICONS = {
   insurance: "🛡️",
   utilities: "💡",
   tithes: "🙏",
+  travel: "✈️",
+  healthcare: "🏥",
+  schooling: "🎓",
   investments: "📈",
   custom: "✦",
 };
+
+const RATE_REFRESH_MS = 12 * 60 * 60 * 1000;
+const RATE_URLS = [
+  "https://open.er-api.com/v6/latest/JPY",
+  "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/jpy.min.json",
+];
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -120,7 +131,7 @@ function applyTheme(theme) {
 }
 
 function formatMoney(amount, currency = settings.defaultCurrency) {
-  const n = Number(amount) || 0;
+  const n = Math.abs(Number(amount) || 0);
   const digits = currency === "JPY" ? 0 : 2;
   const symbol = { JPY: "¥", PHP: "₱", USD: "$" }[currency] || "";
   return `${symbol}${n.toLocaleString(undefined, {
@@ -138,12 +149,20 @@ function dueAmount(row) {
   return groupOf(row) === "out" ? Math.abs(n) : n;
 }
 
-function moneyBlock(amount, currency, cls = "", sign = "") {
+function moneyClass(amount, hint = "") {
+  if (hint === "out" || Number(amount) < 0) return "out";
+  if (hint === "in") return "in";
+  return "";
+}
+
+function moneyBlock(amount, currency, cls = "", convertedAmount) {
   const n = Number(amount) || 0;
   const converted = currency && currency !== settings.defaultCurrency;
+  const tone = moneyClass(n, cls);
+  const asDefault = convertedAmount != null ? Number(convertedAmount) || 0 : toDefault(n, currency);
   return `<span class="money">
-      <strong class="amount ${cls}">${sign}${formatMoney(n, currency)}</strong>
-      ${converted ? `<small class="fx">= ${sign}${formatMoney(toDefault(n, currency))}</small>` : ""}
+      <strong class="amount ${tone}">${formatMoney(n, currency)}</strong>
+      ${converted ? `<small class="fx ${tone}">= ${formatMoney(asDefault)}</small>` : ""}
     </span>`;
 }
 
@@ -153,10 +172,25 @@ function fxHintHtml(amount, currency) {
 }
 
 function toDefault(amount, currency) {
+  return convertAmount(amount, currency, settings.defaultCurrency);
+}
+
+function rateOf(currency) {
   const rates = settings.rates || DEFAULT_SETTINGS.rates;
-  const from = rates[currency] || 1;
-  const to = rates[settings.defaultCurrency] || 1;
-  return (Number(amount) || 0) * (from / to);
+  return Number(rates[currency]) || 1;
+}
+
+function convertAmount(amount, fromCurrency, toCurrency) {
+  const value = Number(amount) || 0;
+  if (!fromCurrency || !toCurrency || fromCurrency === toCurrency) return value;
+  return value * (rateOf(fromCurrency) / rateOf(toCurrency));
+}
+
+function historicalDefault(row) {
+  if (row?.fx?.converted != null && row.fx.defaultCurrency === settings.defaultCurrency) {
+    return Number(row.fx.converted) || 0;
+  }
+  return toDefault(row.amount, row.currency);
 }
 
 function normalizeCategory(id) {
@@ -274,6 +308,7 @@ async function reload() {
       await saveAsset({ ...row, updatedAt: new Date().toISOString() });
     }
   }
+  await ensureSortOrder();
 }
 
 function moneyNow() {
@@ -307,7 +342,7 @@ function flowFor(rows) {
   let expense = 0;
   for (const row of rows) {
     const kind = txKind(row);
-    const value = toDefault(row.amount, row.currency);
+    const value = historicalDefault(row);
     if (kind === "deposit" || kind === "adjust") income += value;
     if (kind === "payment" || kind === "transfer") expense += value;
   }
@@ -319,7 +354,7 @@ function groupSum(rows, kind) {
   const map = new Map();
   for (const row of rows.filter((item) => txKind(item) === want)) {
     const key = row.category || "other";
-    map.set(key, (map.get(key) || 0) + toDefault(row.amount, row.currency));
+    map.set(key, (map.get(key) || 0) + historicalDefault(row));
   }
   return [...map.entries()].sort((a, b) => b[1] - a[1]);
 }
@@ -379,7 +414,6 @@ function txCard(row, accountId) {
       ? kind === "deposit"
       : isDeduction(kind);
   const cls = outgoing ? "out" : "in";
-  const sign = outgoing ? "−" : "+";
   const href = accountId ? `#/account/${accountId}/tx/${row.id}` : `#/activity/${row.id}`;
   const where =
     kind === "transfer"
@@ -391,15 +425,15 @@ function txCard(row, accountId) {
         <h3>${escapeHtml(row.name || meta.label)}</h3>
         <p class="when">${prettyDate(row.date)} · ${escapeHtml(meta.label)} · ${escapeHtml(where)}</p>
       </div>
-      ${moneyBlock(row.amount, row.currency, cls, sign)}
+      ${moneyBlock(row.amount, row.currency, cls, historicalDefault(row))}
     </a>
   </article>`;
 }
 
-function accountCard(row) {
+function accountCard(row, index = 0, total = 1) {
   const due = row.dueDate ? ` · due ${prettyDate(row.dueDate)}` : "";
   const cls = groupOf(row) === "out" ? "out" : groupOf(row) === "in" ? "in" : "";
-  return `<article class="card compact">
+  return `<article class="card compact with-reorder">
     <a class="card-main" href="#/account/${row.id}">
       <div class="meta">
         <h3>${escapeHtml(row.name)}</h3>
@@ -407,43 +441,154 @@ function accountCard(row) {
       </div>
       ${moneyBlock(dueAmount(row), row.currency, cls)}
     </a>
+    <div class="reorder">
+      <button type="button" class="reorder-btn" data-move="up" data-id="${row.id}" aria-label="Move up" ${index === 0 ? "disabled" : ""}>▲</button>
+      <button type="button" class="reorder-btn" data-move="down" data-id="${row.id}" aria-label="Move down" ${index === total - 1 ? "disabled" : ""}>▼</button>
+    </div>
   </article>`;
 }
 
-function sectionList(title, rows) {
+function isCollapsed(key) {
+  return Boolean(settings.collapsedGroups?.[key]);
+}
+
+function applyFoldState(key, collapsed) {
+  settings.collapsedGroups = { ...(settings.collapsedGroups || {}), [key]: collapsed };
+  const block = app.querySelector(`[data-collapse="${key}"]`);
+  if (block) {
+    block.classList.toggle("collapsed", collapsed);
+    const head = block.querySelector(".fold-head");
+    if (head) head.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  }
+}
+
+async function setCollapsed(key, collapsed) {
+  applyFoldState(key, collapsed);
+  await persistSettings();
+}
+
+async function setCollapsedMany(keys, collapsed) {
+  for (const key of keys) applyFoldState(key, collapsed);
+  await persistSettings();
+}
+
+function collapseControls(keys) {
+  if (!keys.length) return "";
+  return `<div class="fold-actions">
+    <button type="button" class="ghost compact" data-collapse-all="${keys.join(",")}">Collapse all</button>
+    <button type="button" class="ghost compact" data-expand-all="${keys.join(",")}">Expand all</button>
+  </div>`;
+}
+
+function fold(key, title, body, count) {
+  const collapsed = isCollapsed(key);
+  return `<section class="fold ${collapsed ? "collapsed" : ""}" data-collapse="${key}">
+    <button type="button" class="fold-head" data-toggle="${key}" aria-expanded="${collapsed ? "false" : "true"}">
+      <span class="section-title">${escapeHtml(title)}</span>
+      ${count != null ? `<span class="fold-count">${count}</span>` : ""}
+      <span class="fold-chevron" aria-hidden="true">▾</span>
+    </button>
+    <div class="fold-body">${body}</div>
+  </section>`;
+}
+
+function sectionList(title, rows, key) {
   if (!rows.length) return "";
-  return `<h2 class="section-title">${escapeHtml(title)}</h2>
-    <div class="list">${rows.map(accountCard).join("")}</div>`;
+  const ordered = sortedAssets(rows);
+  return fold(
+    key,
+    title,
+    `<div class="list">${ordered.map((row, index) => accountCard(row, index, ordered.length)).join("")}</div>`,
+    ordered.length
+  );
+}
+
+function accountSections() {
+  return [
+    ["Cash & banks", cache.assets.filter((row) => ["cash", "bank", "savings"].includes(normalizeCategory(row.category))), "accounts:cash-banks"],
+    ["Credit cards", byType("credit-card"), "accounts:credit-card"],
+    ["Loans", byType("loan"), "accounts:loan"],
+    ["Insurance", byType("insurance"), "accounts:insurance"],
+    ["Utilities", byType("utilities"), "accounts:utilities"],
+    ["Tithes", byType("tithes"), "accounts:tithes"],
+    ["Travel", byType("travel"), "accounts:travel"],
+    ["Healthcare", byType("healthcare"), "accounts:healthcare"],
+    ["Schooling", byType("schooling"), "accounts:schooling"],
+    [
+      "Other assets",
+      cache.assets.filter(
+        (row) =>
+          ["investments", "custom"].includes(normalizeCategory(row.category)) ||
+          (groupOf(row) === "other" && !["travel", "healthcare", "schooling"].includes(normalizeCategory(row.category)))
+      ),
+      "accounts:other",
+    ],
+  ].filter(([, rows]) => rows.length);
+}
+
+function sectionId(row) {
+  const id = normalizeCategory(row.category);
+  if (["cash", "bank", "savings"].includes(id)) return "cash-banks";
+  if (["travel", "healthcare", "schooling", "credit-card", "loan", "insurance", "utilities", "tithes", "investments"].includes(id)) {
+    return id;
+  }
+  return "other";
+}
+
+function sectionPeers(row) {
+  const key = sectionId(row);
+  return cache.assets.filter((item) => sectionId(item) === key);
 }
 
 function byName(a, b) {
   return (a.name || "").localeCompare(b.name || "");
 }
 
+function byOrder(a, b) {
+  return (Number(a.sortOrder) || 0) - (Number(b.sortOrder) || 0) || byName(a, b);
+}
+
 function byDue(a, b) {
-  return (a.dueDate || "9999").localeCompare(b.dueDate || "9999") || byName(a, b);
+  return (a.dueDate || "9999").localeCompare(b.dueDate || "9999") || byOrder(a, b);
+}
+
+function sortedAssets(rows = cache.assets) {
+  return [...rows].sort(byOrder);
 }
 
 function byType(id) {
-  return cache.assets.filter((row) => normalizeCategory(row.category) === id);
+  return sortedAssets(cache.assets.filter((row) => normalizeCategory(row.category) === id));
+}
+
+function clearable(html) {
+  return `<span class="clearable">${html}<button type="button" class="clear-btn" data-clear aria-label="Clear">×</button></span>`;
+}
+
+function appHeader() {
+  const now = moneyNow();
+  const cls = now.available < 0 ? "out" : "in";
+  return `<header class="app-header">
+    <div class="brand">
+      ${logo()}
+      <h1>Bochog Kakei</h1>
+    </div>
+    <div class="header-savings">
+      <span class="eyebrow">Current savings</span>
+      <strong class="amount ${cls}">${formatMoney(now.available)}</strong>
+    </div>
+  </header>`;
+}
+
+function shell(active, html) {
+  return `${appHeader()}${html}${tabbar(active)}`;
 }
 
 async function renderAccounts() {
   const now = moneyNow();
-  app.innerHTML = `
-    <header class="top">
-      <div class="brand">
-        ${logo()}
-        <div>
-          <p class="eyebrow">Household money</p>
-          <h1>Bochog Kakei</h1>
-        </div>
-      </div>
-      <button class="primary" data-go="#/account/new">Add</button>
-    </header>
+  app.innerHTML = shell(
+    "accounts",
+    `
     <section class="hero">
-      <p class="eyebrow">Current savings</p>
-      <p class="hero-amount">${formatMoney(now.available)}</p>
       <div class="hero-split">
         <div>
           <span>In banks</span>
@@ -454,25 +599,22 @@ async function renderAccounts() {
           <strong class="amount out">${formatMoney(now.comingOut)}</strong>
         </div>
       </div>
-      <p class="hint" style="margin-top:8px">Cash, bank, and savings minus credit cards, loans, utilities, insurance, and tithes.</p>
     </section>
     ${
       cache.assets.length
-        ? `${sectionList("Cash & banks", cache.assets.filter((row) => groupOf(row) === "in").sort(byName))}
-           ${sectionList("Credit cards", byType("credit-card").sort(byName))}
-           ${sectionList("Loans", byType("loan").sort(byName))}
-           ${sectionList("Insurance", byType("insurance").sort(byDue))}
-           ${sectionList("Utilities", byType("utilities").sort(byDue))}
-           ${sectionList("Tithes", byType("tithes").sort(byDue))}
-           ${sectionList("Other assets", cache.assets.filter((row) => groupOf(row) === "other").sort(byName))}`
+        ? `${(() => {
+            const sections = accountSections();
+            return `${collapseControls(sections.map((item) => item[2]))}
+              ${sections.map(([title, rows, key]) => sectionList(title, rows, key)).join("")}`;
+          })()}`
         : `<div class="empty">
             <h2>Start with balances</h2>
-            <p>Add cash and bank accounts, then add credit cards, loans, utilities, insurance, and tithes. Current savings is banks minus those amounts due.</p>
-            <button class="primary" data-go="#/account/new">Add an account</button>
+            <p>Add cash and bank accounts in Settings, then add credit cards, bills, travel, healthcare, and schooling funds.</p>
+            <button class="primary" data-go="#/settings">Open Settings</button>
           </div>`
     }
-    ${tabbar("accounts")}
-  `;
+  `
+  );
 }
 
 async function renderAccount(id) {
@@ -483,16 +625,19 @@ async function renderAccount(id) {
   }
   const rows = accountTxs(id);
   const cls = groupOf(row) === "out" ? "out" : "in";
-  app.innerHTML = `
+  app.innerHTML = shell(
+    "accounts",
+    `
     <div class="form-top">
       <button class="ghost" data-go="#/">Back</button>
       <button class="ghost" data-go="#/account/${row.id}/edit">Edit</button>
     </div>
-    <section class="hero">
+    <section class="hero account-hero" data-go="#/account/${row.id}/edit" role="button" tabindex="0">
       <p class="eyebrow"><span class="type-icon">${typeIcon(row.category)}</span> ${escapeHtml(typeLabel(row))}</p>
       <h1>${escapeHtml(row.name)}</h1>
       <div class="hero-amount ${cls === "out" ? "amount out" : ""}">${moneyBlock(dueAmount(row), row.currency, cls)}</div>
       ${row.dueDate ? `<p class="hint">Due ${prettyDate(row.dueDate)}</p>` : ""}
+      <p class="hint">Tap this account to edit</p>
     </section>
     <header class="top">
       <h2 class="section-title" style="margin:0">Transactions</h2>
@@ -506,15 +651,17 @@ async function renderAccount(id) {
             <p>Add a payment or transfer to subtract, or a deposit or adjustment to add.</p>
           </div>`
     }
-    ${tabbar("accounts")}
-  `;
+  `
+  );
 }
 
 async function renderAccountForm(id) {
   const row = id ? await getAsset(id) : null;
   const selectedType = normalizeCategory(row?.category || "bank");
   const back = id ? `#/account/${id}` : "#/";
-  app.innerHTML = `
+  app.innerHTML = shell(
+    "accounts",
+    `
     <div class="form-top">
       <button class="ghost" data-go="${back}">Back</button>
       ${id ? `<button class="danger compact" id="deleteAccount" type="button">Delete</button>` : ""}
@@ -522,7 +669,7 @@ async function renderAccountForm(id) {
     <h1>${id ? "Edit account" : "New account"}</h1>
     <form class="form" id="accountForm">
       <label>Name
-        <input name="name" required value="${escapeAttr(row?.name || "")}" placeholder="MUFG, cash wallet, Tokyo Gas…" />
+        ${clearable(`<input name="name" required value="${escapeAttr(row?.name || "")}" placeholder="MUFG, cash wallet, Tokyo Gas…" />`)}
       </label>
       <label>Type
         <select name="category" id="accountType">
@@ -540,22 +687,22 @@ async function renderAccountForm(id) {
         </select>
       </label>
       <label id="balanceLabel">${isAmountDueType(selectedType) ? "Amount due" : "Current balance"}
-        <input name="value" type="number" step="any" required value="${escapeAttr(dueAmount(row || { value: 0, category: selectedType }))}" />
+        ${clearable(`<input name="value" type="number" step="any" required value="${escapeAttr(dueAmount(row || { value: 0, category: selectedType }))}" />`)}
       </label>
       <p class="fx-hint" id="fxHint"></p>
       <label id="dueField" class="${isDueType(selectedType) ? "" : "hidden"}">Due date
         <input name="dueDate" type="date" value="${escapeAttr(row?.dueDate || "")}" />
       </label>
       <label id="customField" class="${selectedType === "custom" ? "" : "hidden"}">Custom type
-        <input name="customType" value="${escapeAttr(row?.customType || "")}" placeholder="e.g. Pension, crypto, gold…" />
+        ${clearable(`<input name="customType" value="${escapeAttr(row?.customType || "")}" placeholder="e.g. Pension, crypto, gold…" />`)}
       </label>
       <label>Notes
-        <textarea name="notes">${escapeHtml(row?.notes || "")}</textarea>
+        ${clearable(`<textarea name="notes">${escapeHtml(row?.notes || "")}</textarea>`)}
       </label>
       <button class="primary" type="submit">Save</button>
     </form>
-    ${tabbar("accounts")}
-  `;
+  `
+  );
   updateFxHint();
 }
 
@@ -565,7 +712,9 @@ async function renderActivity() {
     .filter((row) => ui.txType === "all" || txKind(row) === ui.txType)
     .filter((row) => !q || [row.name, row.notes, txMeta(txKind(row)).label].join(" ").toLowerCase().includes(q))
     .sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.createdAt || "").localeCompare(a.createdAt || ""));
-  app.innerHTML = `
+  app.innerHTML = shell(
+    "activity",
+    `
     <header class="top">
       <div>
         <p class="eyebrow">All accounts</p>
@@ -574,7 +723,7 @@ async function renderActivity() {
       <button class="primary" data-go="#/activity/new">Add</button>
     </header>
     ${monthNav()}
-    <input class="search" id="txSearch" type="search" placeholder="Search" value="${escapeAttr(ui.txQuery)}" />
+    ${clearable(`<input class="search" id="txSearch" type="search" placeholder="Search" value="${escapeAttr(ui.txQuery)}" />`)}
     <div class="filters">
       ${["all", "payment", "deposit", "adjust", "transfer"]
         .map((key) => `<button class="chip ${ui.txType === key ? "active" : ""}" data-tx-type="${key}">${key === "all" ? "All" : txMeta(key).label}</button>`)
@@ -585,12 +734,12 @@ async function renderActivity() {
         ? `<div class="list">${rows.map((row) => txCard(row)).join("")}</div>`
         : `<div class="empty"><h2>No activity this month</h2><p>Open an account and add a payment, deposit, adjustment, or transfer.</p></div>`
     }
-    ${tabbar("activity")}
-  `;
+  `
+  );
 }
 
 function accountOptions(selected, extra = "") {
-  return `<option value="">${extra || "Select account"}</option>${cache.assets
+  return `<option value="">${extra || "Select account"}</option>${sortedAssets()
     .map((row) => `<option value="${row.id}" ${selected === row.id ? "selected" : ""}>${escapeHtml(row.name)}</option>`)
     .join("")}`;
 }
@@ -601,7 +750,9 @@ async function renderTxForm(id, accountId) {
   const lockedAccount = accountId || row?.assetId || "";
   const back = accountId ? `#/account/${accountId}` : "#/activity";
   const cats = kind === "deposit" || kind === "adjust" ? settings.incomeCategories : settings.expenseCategories;
-  app.innerHTML = `
+  app.innerHTML = shell(
+    accountId ? "accounts" : "activity",
+    `
     <div class="form-top">
       <button class="ghost" data-go="${back}">Back</button>
       ${id ? `<button class="danger compact" id="deleteTx" type="button">Delete</button>` : ""}
@@ -618,10 +769,10 @@ async function renderTxForm(id, accountId) {
         <input name="date" type="date" required value="${escapeAttr(row?.date || today())}" />
       </label>
       <label>Name
-        <input name="name" value="${escapeAttr(row?.name || "")}" placeholder="Electric bill, salary, card payment…" />
+        ${clearable(`<input name="name" value="${escapeAttr(row?.name || "")}" placeholder="Electric bill, salary, card payment…" />`)}
       </label>
       <label>Amount
-        <input name="amount" type="number" step="any" required value="${escapeAttr(row?.amount ?? "")}" />
+        ${clearable(`<input name="amount" type="number" step="any" required value="${escapeAttr(row?.amount ?? "")}" />`)}
       </label>
       <p class="fx-hint" id="fxHint"></p>
       <div class="row">
@@ -643,12 +794,12 @@ async function renderTxForm(id, accountId) {
         <select name="toAssetId">${accountOptions(row?.toAssetId, "Select account")}</select>
       </label>
       <label>Notes
-        <textarea name="notes">${escapeHtml(row?.notes || "")}</textarea>
+        ${clearable(`<textarea name="notes">${escapeHtml(row?.notes || "")}</textarea>`)}
       </label>
       <button class="primary" type="submit">Save</button>
     </form>
-    ${tabbar(accountId ? "accounts" : "activity")}
-  `;
+  `
+  );
   setTxType(kind);
   updateFxHint();
 }
@@ -658,7 +809,9 @@ async function renderReport() {
   const flow = flowFor(rows);
   const kind = ui.reportKind;
   const items = groupSum(rows, kind);
-  app.innerHTML = `
+  app.innerHTML = shell(
+    "report",
+    `
     <header class="top">
       <div>
         <p class="eyebrow">This month</p>
@@ -688,8 +841,8 @@ async function renderReport() {
       <button class="ghost" id="excelBtn" type="button">Excel</button>
       <button class="ghost" id="pdfBtn" type="button">Print / PDF</button>
     </div>
-    ${tabbar("report")}
-  `;
+  `
+  );
 }
 
 function reportRows() {
@@ -708,57 +861,104 @@ function reportRows() {
 }
 
 async function renderSettings() {
-  app.innerHTML = `
+  const auto = await latestAutoBackup();
+  const rateAge = settings.ratesUpdatedAt ? prettyDate(settings.ratesUpdatedAt.slice(0, 10)) : "not yet";
+  const settingKeys = [
+    "settings:appearance",
+    "settings:currency",
+    "settings:backup",
+    "settings:accounts",
+    "settings:expense",
+    "settings:income",
+  ];
+  app.innerHTML = shell(
+    "settings",
+    `
     <header class="top">
       <div>
         <p class="eyebrow">This device only</p>
         <h1>Settings</h1>
       </div>
     </header>
-    <h2 class="section-title">Backup</h2>
-    <p class="hint">Data stays on this device. Export a copy before clearing the browser.</p>
-    <div class="footer-links">
-      <button class="ghost" id="backupBtn" type="button">Export backup</button>
-      <label class="file-btn ghost">Import backup<input id="importFile" type="file" accept="application/json" /></label>
-    </div>
-    <h2 class="section-title">Appearance</h2>
-    <div class="theme-row">
-      <button class="chip ${settings.theme === "light" ? "active" : ""}" data-theme-pick="light">Light</button>
-      <button class="chip ${settings.theme === "dark" ? "active" : ""}" data-theme-pick="dark">Dark</button>
-    </div>
-    <h2 class="section-title">Currency</h2>
-    <label>Default
-      <select id="defaultCurrency">
-        ${CURRENCIES.map((c) => `<option ${settings.defaultCurrency === c ? "selected" : ""}>${c}</option>`).join("")}
-      </select>
-    </label>
-    <div class="row" style="margin-top:10px">
-      <label>USD → JPY
-        <input id="rateUSD" type="number" step="any" value="${escapeAttr(settings.rates.USD)}" />
+    ${collapseControls(settingKeys)}
+    ${fold(
+      "settings:appearance",
+      "Appearance",
+      `<div class="theme-row">
+        <button class="chip ${settings.theme === "light" ? "active" : ""}" data-theme-pick="light">Light</button>
+        <button class="chip ${settings.theme === "dark" ? "active" : ""}" data-theme-pick="dark">Dark</button>
+      </div>`
+    )}
+    ${fold(
+      "settings:currency",
+      "Currency",
+      `<label>Default
+        <select id="defaultCurrency">
+          ${CURRENCIES.map((c) => `<option ${settings.defaultCurrency === c ? "selected" : ""}>${c}</option>`).join("")}
+        </select>
       </label>
-      <label>PHP → JPY
-        <input id="ratePHP" type="number" step="any" value="${escapeAttr(settings.rates.PHP)}" />
+      <label style="margin-top:10px">
+        <span><input id="autoRates" type="checkbox" ${settings.autoRates !== false ? "checked" : ""} /> Update rates automatically</span>
       </label>
-    </div>
-    <h2 class="section-title">Expense categories</h2>
-    ${catEditor("expenseCategories")}
-    <h2 class="section-title">Income categories</h2>
-    ${catEditor("incomeCategories")}
-    ${tabbar("settings")}
-  `;
+      <div class="row" style="margin-top:10px">
+        <label>USD → JPY
+          ${clearable(`<input id="rateUSD" type="number" step="any" value="${escapeAttr(settings.rates.USD)}" />`)}
+        </label>
+        <label>PHP → JPY
+          ${clearable(`<input id="ratePHP" type="number" step="any" value="${escapeAttr(settings.rates.PHP)}" />`)}
+        </label>
+      </div>
+      <p class="rate-status">${settings.ratesError || `Rates from ${escapeHtml(settings.ratesSource || "default")} · ${rateAge}`}</p>
+      <div class="footer-links">
+        <button class="ghost" id="refreshRates" type="button">Refresh rates now</button>
+      </div>`
+    )}
+    ${fold(
+      "settings:backup",
+      "Backup",
+      `<p class="hint">Data stays on this device. Export a copy before clearing the browser. Automatic backups are kept locally (last 7).</p>
+      <p class="rate-status">${auto?.createdAt ? `Last automatic backup: ${prettyDate(auto.createdAt.slice(0, 10))}` : "No automatic backup yet."}</p>
+      <div class="footer-links">
+        <button class="ghost" id="backupBtn" type="button">Export backup</button>
+        <label class="file-btn ghost">Import backup<input id="importFile" type="file" accept="application/json" /></label>
+      </div>`
+    )}
+    ${fold(
+      "settings:accounts",
+      "Accounts",
+      `<p class="hint">Use ↑ ↓ on the Accounts screen to change order within a group.</p>
+      <button class="primary" data-go="#/account/new">Add account</button>
+      <div class="list" style="margin-top:10px">
+        ${
+          cache.assets.length
+            ? sortedAssets()
+                .map(
+                  (row) => `<div class="manage-row">
+              <button class="ghost" data-go="#/account/${row.id}/edit">${typeIcon(row.category)} ${escapeHtml(row.name)}</button>
+            </div>`
+                )
+                .join("")
+            : `<p class="hint">No accounts yet.</p>`
+        }
+      </div>`
+    )}
+    ${fold("settings:expense", "Expense categories", catEditor("expenseCategories"))}
+    ${fold("settings:income", "Income categories", catEditor("incomeCategories"))}
+  `
+  );
 }
 
 function catEditor(key) {
   return `<ul class="edit-list">${settings[key]
     .map(
       (row, index) => `<li>
-        <input data-cat-key="${key}" data-cat-index="${index}" value="${escapeAttr(row.label)}" />
+        ${clearable(`<input data-cat-key="${key}" data-cat-index="${index}" value="${escapeAttr(row.label)}" />`)}
         <button class="danger compact" data-del-cat="${key}:${index}" type="button">Remove</button>
       </li>`
     )
     .join("")}</ul>
     <div class="add-row">
-      <input id="new-${key}" placeholder="New category" />
+      ${clearable(`<input id="new-${key}" placeholder="New category" />`)}
       <button class="chip" data-add-cat="${key}" type="button">Add</button>
     </div>`;
 }
@@ -783,13 +983,15 @@ async function computeEffect(kind, data, amount) {
   const assets = await listAssets();
   const from = assets.find((row) => row.id === data.assetId);
   const to = assets.find((row) => row.id === data.toAssetId);
+  const fromAmount = from ? convertAmount(amount, data.currency, from.currency) : amount;
+  const toAmount = to ? convertAmount(amount, data.currency, to.currency) : amount;
   if ((kind === "deposit" || kind === "adjust" || kind === "payment") && from) {
-    return [{ id: from.id, delta: accountDelta(kind, from, amount) }];
+    return [{ id: from.id, delta: accountDelta(kind, from, fromAmount) }];
   }
   if (kind === "transfer" && from && to) {
     return [
-      { id: from.id, delta: accountDelta(kind, from, amount, "from") },
-      { id: to.id, delta: accountDelta(kind, to, amount, "to") },
+      { id: from.id, delta: accountDelta(kind, from, fromAmount, "from") },
+      { id: to.id, delta: accountDelta(kind, to, toAmount, "to") },
     ];
   }
   return [];
@@ -802,6 +1004,7 @@ async function persistSettings() {
 
 async function afterSave(hash) {
   await reload();
+  queueAutoBackup();
   go(hash);
 }
 
@@ -855,8 +1058,104 @@ function updateAccountTypeUi() {
   const label = app.querySelector("#balanceLabel");
   if (due) due.classList.toggle("hidden", !isDueType(type));
   if (custom) custom.classList.toggle("hidden", type !== "custom");
-  if (label) label.childNodes[0].textContent = isAmountDueType(type) ? "Amount due" : "Current balance";
+  if (label) {
+    const text = isAmountDueType(type) ? "Amount due" : "Current balance";
+    const node = [...label.childNodes].find((item) => item.nodeType === Node.TEXT_NODE);
+    if (node) node.textContent = text;
+    else label.prepend(text);
+  }
   updateFxHint();
+}
+
+async function ensureSortOrder() {
+  const groups = new Map();
+  for (const row of cache.assets) {
+    const key = sectionId(row);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+  for (const rows of groups.values()) {
+    const missing = rows.filter((row) => row.sortOrder == null);
+    if (!missing.length) continue;
+    const max = rows.reduce((n, row) => Math.max(n, Number(row.sortOrder) || 0), 0);
+    missing.sort(byName);
+    for (let i = 0; i < missing.length; i++) {
+      missing[i].sortOrder = max + (i + 1) * 10;
+      await saveAsset({ ...missing[i], updatedAt: new Date().toISOString() });
+    }
+  }
+}
+
+async function moveAccount(id, dir) {
+  const row = cache.assets.find((item) => item.id === id);
+  if (!row) return;
+  const peers = sortedAssets(sectionPeers(row));
+  const i = peers.findIndex((item) => item.id === id);
+  const j = i + (dir === "up" ? -1 : 1);
+  if (i < 0 || j < 0 || j >= peers.length) return;
+  const ids = peers.map((item) => item.id);
+  [ids[i], ids[j]] = [ids[j], ids[i]];
+  for (let k = 0; k < ids.length; k++) {
+    const asset = cache.assets.find((item) => item.id === ids[k]);
+    await saveAsset({ ...asset, sortOrder: (k + 1) * 10, updatedAt: new Date().toISOString() });
+  }
+  await reload();
+  queueAutoBackup();
+  route();
+}
+
+function jpyPerUnitFromBaseJpy(map) {
+  const rates = { JPY: 1 };
+  for (const code of ["USD", "PHP"]) {
+    const perJpy = Number(map[code] ?? map[code.toLowerCase()]);
+    if (perJpy > 0) rates[code] = 1 / perJpy;
+  }
+  return rates;
+}
+
+async function fetchLiveRates() {
+  let lastError = null;
+  for (const url of RATE_URLS) {
+    try {
+      const res = await fetch(url, { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const map = data.rates || data.jpy || {};
+      const rates = jpyPerUnitFromBaseJpy(map);
+      if (rates.USD && rates.PHP) {
+        return { rates, source: url.includes("er-api") ? "open.er-api.com" : "currency-api" };
+      }
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError || new Error("Rate lookup failed");
+}
+
+async function refreshRates({ force = false } = {}) {
+  if (settings.autoRates === false && !force) return false;
+  const updated = settings.ratesUpdatedAt ? Date.parse(settings.ratesUpdatedAt) : 0;
+  if (!force && updated && Date.now() - updated < RATE_REFRESH_MS) return false;
+  try {
+    const { rates, source } = await fetchLiveRates();
+    settings.rates = { ...settings.rates, ...rates, JPY: 1 };
+    settings.ratesUpdatedAt = new Date().toISOString();
+    settings.ratesSource = source;
+    settings.ratesError = "";
+    await persistSettings();
+    return true;
+  } catch {
+    settings.ratesError = "Using saved rates (offline or rate lookup failed).";
+    return false;
+  }
+}
+
+let backupTimer = 0;
+function queueAutoBackup() {
+  clearTimeout(backupTimer);
+  backupTimer = setTimeout(() => {
+    saveAutoBackup().catch(() => {});
+  }, 1200);
 }
 
 async function route() {
@@ -871,6 +1170,48 @@ async function route() {
 }
 
 app.addEventListener("click", async (e) => {
+  const move = e.target.closest("[data-move]");
+  if (move) {
+    e.preventDefault();
+    if (move.disabled) return;
+    await moveAccount(move.dataset.id, move.dataset.move);
+    return;
+  }
+  const toggle = e.target.closest("[data-toggle]")?.dataset.toggle;
+  if (toggle) {
+    e.preventDefault();
+    await setCollapsed(toggle, !isCollapsed(toggle));
+    return;
+  }
+  const collapseAll = e.target.closest("[data-collapse-all]")?.dataset.collapseAll;
+  if (collapseAll) {
+    e.preventDefault();
+    await setCollapsedMany(collapseAll.split(",").filter(Boolean), true);
+    return;
+  }
+  const expandAll = e.target.closest("[data-expand-all]")?.dataset.expandAll;
+  if (expandAll) {
+    e.preventDefault();
+    await setCollapsedMany(expandAll.split(",").filter(Boolean), false);
+    return;
+  }
+  const clearBtn = e.target.closest("[data-clear]");
+  if (clearBtn) {
+    e.preventDefault();
+    const field = clearBtn.parentElement?.querySelector("input, textarea");
+    if (field) {
+      field.value = "";
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+      field.dispatchEvent(new Event("change", { bubbles: true }));
+      field.focus();
+    }
+    return;
+  }
+  if (e.target.id === "refreshRates") {
+    await refreshRates({ force: true });
+    renderSettings();
+    return;
+  }
   const goTo = e.target.closest("[data-go]")?.dataset.go;
   if (goTo) {
     e.preventDefault();
@@ -982,6 +1323,13 @@ app.addEventListener("change", async (e) => {
     await persistSettings();
     return;
   }
+  if (e.target.id === "autoRates") {
+    settings.autoRates = e.target.checked;
+    await persistSettings();
+    if (settings.autoRates) await refreshRates({ force: true });
+    renderSettings();
+    return;
+  }
   if (e.target.id === "rateUSD" || e.target.id === "ratePHP") {
     settings.rates.USD = Number(app.querySelector("#rateUSD").value) || settings.rates.USD;
     settings.rates.PHP = Number(app.querySelector("#ratePHP").value) || settings.rates.PHP;
@@ -1003,6 +1351,7 @@ app.addEventListener("change", async (e) => {
   if (!confirm("Import will replace data on this device. Continue?")) return;
   await importAll(JSON.parse(await file.text()));
   await reload();
+  queueAutoBackup();
   go("#/");
 });
 
@@ -1034,6 +1383,7 @@ app.addEventListener("submit", async (e) => {
       customType: data.category === "custom" ? (data.customType || "").trim() : "",
       dueDate: isDueType(data.category) ? data.dueDate || "" : "",
       liability: Boolean(cat.liability),
+      sortOrder: existing?.sortOrder ?? sectionPeers({ category: data.category }).reduce((n, row) => Math.max(n, Number(row.sortOrder) || 0), 0) + 10,
       createdAt: existing?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
@@ -1066,6 +1416,11 @@ app.addEventListener("submit", async (e) => {
       toAssetId: kind === "transfer" ? data.toAssetId || "" : "",
       notes: data.notes || "",
       effect: { changes },
+      fx: {
+        rates: { ...(settings.rates || DEFAULT_SETTINGS.rates) },
+        defaultCurrency: settings.defaultCurrency,
+        converted: toDefault(amount, data.currency),
+      },
       createdAt: existing?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
@@ -1086,8 +1441,10 @@ window.addEventListener("hashchange", route);
 async function boot() {
   applyTheme(localStorage.getItem("bochog-theme") || "light");
   await reload();
+  await refreshRates();
   await saveSettings(settings);
   await reload();
+  queueAutoBackup();
   route();
 }
 

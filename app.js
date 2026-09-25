@@ -15,6 +15,7 @@ import {
   saveAutoBackup,
   saveSettings,
   saveTransaction,
+  wipeSnapshots,
 } from "./db.js";
 import { downloadFile, printReport, toCsv, toExcelXml } from "./export.js";
 
@@ -618,7 +619,14 @@ async function renderAccounts() {
 }
 
 async function renderAccount(id) {
-  const row = await getAsset(id);
+  let row;
+  try {
+    row = await getAsset(id);
+  } catch (err) {
+    console.error(err);
+    go("#/");
+    return;
+  }
   if (!row) {
     go("#/");
     return;
@@ -916,9 +924,10 @@ async function renderSettings() {
     ${fold(
       "settings:backup",
       "Backup",
-      `<p class="hint">Data stays on this device. Export a copy before clearing the browser. Automatic backups are kept locally (last 7).</p>
-      <p class="rate-status">${auto?.createdAt ? `Last automatic backup: ${prettyDate(auto.createdAt.slice(0, 10))}` : "No automatic backup yet."}</p>
+      `<p class="hint">Changes save on this device as you go. Nothing is uploaded. When you are done with a batch of updates, export a copy — that is the only sync.</p>
+      <p class="rate-status">${auto?.createdAt ? `Last local backup: ${prettyDate(auto.createdAt.slice(0, 10))}` : "No local backup yet."}</p>
       <div class="footer-links">
+        <button class="ghost" id="saveLocalBackup" type="button">Save local backup</button>
         <button class="ghost" id="backupBtn" type="button">Export backup</button>
         <label class="file-btn ghost">Import backup<input id="importFile" type="file" accept="application/json" /></label>
       </div>`
@@ -1004,7 +1013,6 @@ async function persistSettings() {
 
 async function afterSave(hash) {
   await reload();
-  queueAutoBackup();
   go(hash);
 }
 
@@ -1100,7 +1108,6 @@ async function moveAccount(id, dir) {
     await saveAsset({ ...asset, sortOrder: (k + 1) * 10, updatedAt: new Date().toISOString() });
   }
   await reload();
-  queueAutoBackup();
   route();
 }
 
@@ -1150,23 +1157,20 @@ async function refreshRates({ force = false } = {}) {
   }
 }
 
-let backupTimer = 0;
-function queueAutoBackup() {
-  clearTimeout(backupTimer);
-  backupTimer = setTimeout(() => {
-    saveAutoBackup().catch(() => {});
-  }, 1200);
-}
-
 async function route() {
-  const r = parseRoute();
-  if (r.name === "account") return renderAccount(r.id);
-  if (r.name === "account-form") return renderAccountForm(r.id);
-  if (r.name === "activity") return renderActivity();
-  if (r.name === "tx-form") return renderTxForm(r.id, r.accountId);
-  if (r.name === "report") return renderReport();
-  if (r.name === "settings") return renderSettings();
-  return renderAccounts();
+  try {
+    const r = parseRoute();
+    if (r.name === "account") return await renderAccount(r.id);
+    if (r.name === "account-form") return await renderAccountForm(r.id);
+    if (r.name === "activity") return await renderActivity();
+    if (r.name === "tx-form") return await renderTxForm(r.id, r.accountId);
+    if (r.name === "report") return await renderReport();
+    if (r.name === "settings") return await renderSettings();
+    return await renderAccounts();
+  } catch (err) {
+    console.error(err);
+    app.innerHTML = `<section class="hero"><h1>Could not open this screen</h1><p class="hint">Your data is still on this device.</p><button class="primary" data-go="#/">Back to accounts</button></section>`;
+  }
 }
 
 app.addEventListener("click", async (e) => {
@@ -1209,6 +1213,11 @@ app.addEventListener("click", async (e) => {
   }
   if (e.target.id === "refreshRates") {
     await refreshRates({ force: true });
+    renderSettings();
+    return;
+  }
+  if (e.target.id === "saveLocalBackup") {
+    await saveAutoBackup({ force: true });
     renderSettings();
     return;
   }
@@ -1351,7 +1360,6 @@ app.addEventListener("change", async (e) => {
   if (!confirm("Import will replace data on this device. Continue?")) return;
   await importAll(JSON.parse(await file.text()));
   await reload();
-  queueAutoBackup();
   go("#/");
 });
 
@@ -1438,14 +1446,23 @@ function restoreCaret(id, start) {
 
 window.addEventListener("hashchange", route);
 
+const SNAPSHOT_PRUNE_KEY = "bochog-prune-snapshots-v13";
+
 async function boot() {
   applyTheme(localStorage.getItem("bochog-theme") || "light");
-  await reload();
-  await refreshRates();
-  await saveSettings(settings);
-  await reload();
-  queueAutoBackup();
-  route();
+  try {
+    if (!localStorage.getItem(SNAPSHOT_PRUNE_KEY)) {
+      await wipeSnapshots();
+      localStorage.setItem(SNAPSHOT_PRUNE_KEY, "1");
+    }
+    await reload();
+    await route();
+  } catch (err) {
+    console.error(err);
+    app.innerHTML = `<section class="hero"><h1>Could not open Bochog Kakei</h1><p class="hint">Try again, or open the home page instead of an account link.</p><button class="primary" data-go="#/">Open accounts</button></section>`;
+    return;
+  }
+  refreshRates().catch(() => {});
 }
 
 boot();

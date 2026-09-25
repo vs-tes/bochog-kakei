@@ -48,8 +48,11 @@ export const DEFAULT_SETTINGS = {
   collapsedGroups: {},
 };
 
+let dbPromise = null;
+
 function openDb() {
-  return new Promise((resolve, reject) => {
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = () => {
       const db = request.result;
@@ -59,9 +62,22 @@ function openDb() {
         }
       }
     };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const db = request.result;
+      db.onclose = () => {
+        dbPromise = null;
+      };
+      db.onerror = () => {
+        dbPromise = null;
+      };
+      resolve(db);
+    };
+    request.onerror = () => {
+      dbPromise = null;
+      reject(request.error);
+    };
   });
+  return dbPromise;
 }
 
 function all(store) {
@@ -136,26 +152,52 @@ export const listSnapshots = () => all("snapshots");
 export const saveSnapshot = (row) => put("snapshots", row);
 export const deleteSnapshot = (id) => remove("snapshots", id);
 
-export async function saveAutoBackup() {
-  const data = await exportAll();
-  const slim = { ...data, attachments: [] };
-  await put("snapshots", {
+export async function wipeSnapshots() {
+  const db = await openDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction("snapshots", "readwrite");
+    tx.objectStore("snapshots").clear();
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function snapshotKeys() {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("snapshots", "readonly");
+    const request = tx.objectStore("snapshots").getAllKeys();
+    request.onsuccess = () => resolve(request.result || []);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function autoBackupKeys(keys) {
+  return keys.filter((id) => String(id).startsWith("auto:")).sort();
+}
+
+export async function saveAutoBackup({ force = false } = {}) {
+  if (!force) {
+    const latest = await latestAutoBackup();
+    if (latest?.createdAt && Date.now() - Date.parse(latest.createdAt) < 6 * 60 * 60 * 1000) {
+      return latest;
+    }
+  }
+  const data = await exportData({ includeAttachments: false });
+  const row = {
     id: `auto:${Date.now()}`,
     createdAt: new Date().toISOString(),
-    payload: slim,
-  });
-  const autos = (await listSnapshots())
-    .filter((row) => String(row.id).startsWith("auto:"))
-    .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
-  for (const row of autos.slice(7)) await deleteSnapshot(row.id);
-  return autos[0] || null;
+    payload: data,
+  };
+  await put("snapshots", row);
+  const extras = autoBackupKeys(await snapshotKeys()).slice(0, -3);
+  for (const id of extras) await deleteSnapshot(id);
+  return row;
 }
 
 export async function latestAutoBackup() {
-  const autos = (await listSnapshots())
-    .filter((row) => String(row.id).startsWith("auto:"))
-    .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
-  return autos[0] || null;
+  const latestKey = autoBackupKeys(await snapshotKeys()).at(-1);
+  return latestKey ? one("snapshots", latestKey) : null;
 }
 
 export async function saveAttachment(id, blob, name, mime) {
@@ -208,29 +250,40 @@ function blobToDataUrl(blob) {
   });
 }
 
-export async function exportAll() {
-  const [assets, transactions, goals, snapshots, settings] = await Promise.all([
+export async function exportData({ includeAttachments = false } = {}) {
+  const [assets, transactions, goals, settings] = await Promise.all([
     listAssets(),
     listTransactions(),
     listGoals(),
-    listSnapshots(),
     getSettings(),
   ]);
-  const db = await openDb();
-  const attachments = await new Promise((resolve, reject) => {
-    const tx = db.transaction("attachments", "readonly");
-    const request = tx.objectStore("attachments").getAll();
-    request.onsuccess = () => resolve(request.result || []);
-    request.onerror = () => reject(request.error);
-  });
-  const files = await Promise.all(
-    attachments.map(async (row) => ({
-      id: row.id,
-      name: row.name,
-      mime: row.mime,
-      dataUrl: await blobToDataUrl(row.blob),
-    }))
-  );
+  let files = [];
+  if (includeAttachments) {
+    const db = await openDb();
+    const attachments = await new Promise((resolve, reject) => {
+      const tx = db.transaction("attachments", "readonly");
+      const request = tx.objectStore("attachments").getAll();
+      request.onsuccess = () => resolve(request.result || []);
+      request.onerror = () => reject(request.error);
+    });
+    files = (
+      await Promise.all(
+        attachments.map(async (row) => {
+          try {
+            if (!row?.blob) return null;
+            return {
+              id: row.id,
+              name: row.name,
+              mime: row.mime,
+              dataUrl: await blobToDataUrl(row.blob),
+            };
+          } catch {
+            return null;
+          }
+        })
+      )
+    ).filter(Boolean);
+  }
   return {
     app: "bochog-kakei",
     version: 1,
@@ -238,11 +291,13 @@ export async function exportAll() {
     assets,
     transactions,
     goals,
-    snapshots,
+    snapshots: [],
     settings,
     attachments: files,
   };
 }
+
+export const exportAll = () => exportData({ includeAttachments: true });
 
 export async function importAll(payload) {
   if (!payload || payload.app !== "bochog-kakei" || !Array.isArray(payload.transactions)) {
@@ -256,7 +311,6 @@ export async function importAll(payload) {
     for (const row of payload.assets || []) tx.objectStore("assets").put(row);
     for (const row of payload.transactions || []) tx.objectStore("transactions").put(row);
     for (const row of payload.goals || []) tx.objectStore("goals").put(row);
-    for (const row of payload.snapshots || []) tx.objectStore("snapshots").put(row);
     if (payload.settings) tx.objectStore("settings").put({ id: "app", ...payload.settings });
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);

@@ -145,9 +145,38 @@ function typeIcon(id) {
   return TYPE_ICONS[normalizeCategory(id)] || "✦";
 }
 
+function accountNet(accountId) {
+  if (!accountId) return 0;
+  let net = 0;
+  for (const tx of cache.txs) {
+    for (const change of tx.effect?.changes || []) {
+      if (change.id === accountId) net += Number(change.delta) || 0;
+    }
+  }
+  return net;
+}
+
+function openingBalance(row) {
+  if (!row) return 0;
+  if (row.initialBalance != null && row.initialBalance !== "") return Number(row.initialBalance) || 0;
+  if (!row.id) return Number(row.value) || 0;
+  return (Number(row.value) || 0) - accountNet(row.id);
+}
+
+function settledValue(row, opening = openingBalance(row)) {
+  const next = (Number(opening) || 0) + accountNet(row?.id);
+  return row && isOutgoingAccount(row) ? Math.max(0, next) : next;
+}
+
 function dueAmount(row) {
-  const n = Number(row?.value) || 0;
+  const n = settledValue(row);
   return groupOf(row) === "out" ? Math.abs(n) : n;
+}
+
+function amountTone(row, amount = dueAmount(row)) {
+  if (row && (groupOf(row) === "out" || Number(amount) < 0)) return "out";
+  if (Number(amount) < 0) return "out";
+  return "in";
 }
 
 function moneyClass(amount, hint = "") {
@@ -433,14 +462,15 @@ function txCard(row, accountId) {
 
 function accountCard(row, index = 0, total = 1) {
   const due = row.dueDate ? ` · due ${prettyDate(row.dueDate)}` : "";
-  const cls = groupOf(row) === "out" ? "out" : groupOf(row) === "in" ? "in" : "";
+  const amount = dueAmount(row);
+  const cls = amountTone(row, amount);
   return `<article class="card compact with-reorder">
     <a class="card-main" href="#/account/${row.id}">
       <div class="meta">
         <h3>${escapeHtml(row.name)}</h3>
         <p class="when"><span class="type-icon">${typeIcon(row.category)}</span> ${escapeHtml(typeLabel(row))}${due}</p>
       </div>
-      ${moneyBlock(dueAmount(row), row.currency, cls)}
+      ${moneyBlock(amount, row.currency, cls)}
     </a>
     <div class="reorder">
       <button type="button" class="reorder-btn" data-move="up" data-id="${row.id}" aria-label="Move up" ${index === 0 ? "disabled" : ""}>▲</button>
@@ -632,7 +662,10 @@ async function renderAccount(id) {
     return;
   }
   const rows = accountTxs(id);
-  const cls = groupOf(row) === "out" ? "out" : "in";
+  const opening = openingBalance(row);
+  const total = dueAmount(row);
+  const cls = amountTone(row, total);
+  const initialLabel = groupOf(row) === "out" ? "Initial amount due" : "Initial balance";
   app.innerHTML = shell(
     "accounts",
     `
@@ -643,9 +676,10 @@ async function renderAccount(id) {
     <section class="hero account-hero" data-go="#/account/${row.id}/edit" role="button" tabindex="0">
       <p class="eyebrow"><span class="type-icon">${typeIcon(row.category)}</span> ${escapeHtml(typeLabel(row))}</p>
       <h1>${escapeHtml(row.name)}</h1>
-      <div class="hero-amount ${cls === "out" ? "amount out" : ""}">${moneyBlock(dueAmount(row), row.currency, cls)}</div>
+      <p class="balance-note"><span>${initialLabel}</span> ${moneyBlock(opening, row.currency, amountTone(row, opening))}</p>
+      <div class="hero-amount ${cls === "out" ? "amount out" : ""}">${moneyBlock(total, row.currency, cls)}</div>
       ${row.dueDate ? `<p class="hint">Due ${prettyDate(row.dueDate)}</p>` : ""}
-      <p class="hint">Tap this account to edit</p>
+      <p class="hint">Total of the initial balance and every transaction. Tap to edit.</p>
     </section>
     <header class="top">
       <h2 class="section-title" style="margin:0">Transactions</h2>
@@ -694,10 +728,12 @@ async function renderAccountForm(id) {
           ${CURRENCIES.map((c) => `<option ${ (row?.currency || settings.defaultCurrency) === c ? "selected" : "" }>${c}</option>`).join("")}
         </select>
       </label>
-      <label id="balanceLabel">${isAmountDueType(selectedType) ? "Amount due" : "Current balance"}
-        ${clearable(`<input name="value" type="number" step="any" required value="${escapeAttr(dueAmount(row || { value: 0, category: selectedType }))}" />`)}
+      <label id="balanceLabel">${isAmountDueType(selectedType) ? "Initial amount due" : "Initial balance"}
+        ${clearable(`<input name="initialBalance" type="number" step="any" required value="${escapeAttr(openingBalance(row))}" />`)}
       </label>
       <p class="fx-hint" id="fxHint"></p>
+      <p class="hint">The balance shown on the account is this amount plus every transaction.</p>
+      <p class="computed-balance" id="computedBalance"></p>
       <label id="dueField" class="${isDueType(selectedType) ? "" : "hidden"}">Due date
         <input name="dueDate" type="date" value="${escapeAttr(row?.dueDate || "")}" />
       </label>
@@ -712,6 +748,7 @@ async function renderAccountForm(id) {
   `
   );
   updateFxHint();
+  updateBalancePreview();
 }
 
 async function renderActivity() {
@@ -1055,7 +1092,7 @@ function updateFxHint() {
     return;
   }
   const currency = form.querySelector("[name=currency]")?.value;
-  const amount = Number(form.querySelector("[name=value], [name=amount]")?.value) || 0;
+  const amount = Number(form.querySelector("[name=initialBalance], [name=amount]")?.value) || 0;
   hint.textContent = fxHintHtml(amount, currency);
 }
 
@@ -1067,12 +1104,29 @@ function updateAccountTypeUi() {
   if (due) due.classList.toggle("hidden", !isDueType(type));
   if (custom) custom.classList.toggle("hidden", type !== "custom");
   if (label) {
-    const text = isAmountDueType(type) ? "Amount due" : "Current balance";
+    const text = isAmountDueType(type) ? "Initial amount due" : "Initial balance";
     const node = [...label.childNodes].find((item) => item.nodeType === Node.TEXT_NODE);
     if (node) node.textContent = text;
     else label.prepend(text);
   }
   updateFxHint();
+  updateBalancePreview();
+}
+
+function updateBalancePreview() {
+  const form = app.querySelector("#accountForm");
+  const computed = app.querySelector("#computedBalance");
+  if (!form || !computed) return;
+  const type = form.querySelector("[name=category]")?.value || "bank";
+  const currency = form.querySelector("[name=currency]")?.value || settings.defaultCurrency;
+  const opening = Number(form.querySelector("[name=initialBalance]")?.value) || 0;
+  const draft = { id: parseRoute().id || "", category: normalizeCategory(type) };
+  const total = dueAmount({ ...draft, initialBalance: opening });
+  const tone = amountTone(draft, total);
+  const label = isOutgoingAccount(draft) ? "Amount due" : "Current balance";
+  const net = accountNet(draft.id);
+  const netTone = isOutgoingAccount(draft) ? (net > 0 ? "out" : "in") : net < 0 ? "out" : "in";
+  computed.innerHTML = `<span class="label">${label}</span><span class="computed-parts">${moneyBlock(total, currency, tone)}<small class="when">Transactions ${moneyBlock(net, currency, netTone)}</small></span>`;
 }
 
 async function ensureSortOrder() {
@@ -1323,8 +1377,9 @@ app.addEventListener("change", async (e) => {
     setTxType(app.querySelector("#txType")?.value || "payment");
     return;
   }
-  if (e.target.name === "currency" || e.target.name === "value" || e.target.name === "amount") {
+  if (e.target.name === "currency" || e.target.name === "initialBalance" || e.target.name === "amount") {
     updateFxHint();
+    updateBalancePreview();
     return;
   }
   if (e.target.id === "defaultCurrency") {
@@ -1364,8 +1419,9 @@ app.addEventListener("change", async (e) => {
 });
 
 app.addEventListener("input", (e) => {
-  if (e.target.name === "value" || e.target.name === "amount" || e.target.name === "currency") {
+  if (e.target.name === "initialBalance" || e.target.name === "amount" || e.target.name === "currency") {
     updateFxHint();
+    updateBalancePreview();
   }
   const start = e.target.selectionStart;
   if (e.target.id === "txSearch") {
@@ -1381,11 +1437,15 @@ app.addEventListener("submit", async (e) => {
     const existing = parseRoute().id ? await getAsset(parseRoute().id) : null;
     const cat = catMeta(data.category);
     const id = existing?.id || uid();
+    const category = normalizeCategory(data.category);
+    const opening = Number(data.initialBalance) || 0;
+    const draft = { id, category, initialBalance: opening, liability: Boolean(cat.liability) };
     await saveAsset({
       id,
       name: data.name.trim(),
-      category: normalizeCategory(data.category),
-      value: Math.abs(Number(data.value) || 0),
+      category,
+      initialBalance: opening,
+      value: settledValue(draft, opening),
       currency: data.currency,
       notes: data.notes || "",
       customType: data.category === "custom" ? (data.customType || "").trim() : "",

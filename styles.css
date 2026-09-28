@@ -344,6 +344,53 @@ label {
 .hero-amount .money { justify-items: start; }
 .hero-amount .amount { font-size: 28px; }
 
+.balance-note {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.balance-note .money { justify-items: start; }
+.balance-note .amount { font-size: 14px; text-transform: none; letter-spacing: -0.03em; }
+
+.computed-balance {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--chip);
+}
+
+.computed-balance .label {
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.computed-parts {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+}
+
+.computed-parts .when {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.computed-parts .when .money { justify-items: end; }
+.computed-parts .when .amount { font-size: 12px; }
+
 .hero-split {
   display: grid;
   grid-template-columns: 1fr 1fr;

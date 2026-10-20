@@ -397,6 +397,10 @@ label {
   gap: 10px;
 }
 
+.hero-split.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .hero-split span {
   display: block;
   font-size: 12px;
@@ -578,7 +582,7 @@ label {
   right: 0;
   bottom: 0;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 4px;
   padding: 8px 10px calc(8px + var(--safe-bottom));
   background: var(--card);
@@ -639,3 +643,128 @@ label {
 .amount.income { color: var(--income); }
 
 .hidden { display: none !important; }
+
+.fund-table-wrap {
+  overflow-x: auto;
+  margin: 0 0 14px;
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.fund-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.fund-table th,
+.fund-table td {
+  padding: 10px 8px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.fund-table th:first-child,
+.fund-table td:first-child {
+  text-align: left;
+  font-weight: 650;
+}
+
+.fund-table th {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.fund-table td.out { color: var(--expense); font-weight: 700; }
+
+.funding-card {
+  padding: 12px;
+  margin-bottom: 10px;
+  border-left: 4px solid var(--income);
+}
+
+.funding-card.status-low { border-left-color: #c48a1a; }
+.funding-card.status-insufficient { border-left-color: var(--expense); }
+
+.funding-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.funding-head h2 { font-size: 18px; }
+.funding-status {
+  margin: 8px 0 10px;
+  font-weight: 700;
+}
+
+.status-insufficient .funding-status { color: var(--expense); }
+.status-low .funding-status { color: #c48a1a; }
+.status-ok .funding-status { color: var(--income); }
+
+.funding-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.funding-stats dt {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.funding-stats dd {
+  margin: 4px 0 0;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.funding-stats dd.out { color: var(--expense); }
+
+.debit-list {
+  list-style: none;
+  margin: 0;
+  padding: 8px 0 0;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 6px;
+}
+
+.debit-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.debit-edit, .debit-add {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  background: var(--paper);
+  border-radius: 16px;
+}
+
+.debit-enable {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+}

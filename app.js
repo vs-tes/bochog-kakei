@@ -18,6 +18,13 @@ import {
   wipeSnapshots,
 } from "./db.js";
 import { downloadFile, printReport, toCsv, toExcelXml } from "./export.js";
+import {
+  BANKS,
+  DEFAULT_AUTO_DEBITS,
+  bankFunding,
+  clampDay,
+  normalizeDebit,
+} from "./debits.js";
 
 const app = document.getElementById("app");
 const TX_TYPES = [
@@ -117,8 +124,8 @@ function parseRoute() {
   if (a === "account" && b) return { name: "account", id: b };
   if (a === "activity" && b === "new") return { name: "tx-form", id: null, accountId: null };
   if (a === "activity" && b) return { name: "tx-form", id: b, accountId: null };
-  if (a === "activity") return { name: "activity" };
-  if (a === "report") return { name: "report" };
+  if (a === "activity" || a === "report") return { name: "banks" };
+  if (a === "banks" || a === "balance" || a === "funding") return { name: "banks" };
   if (a === "settings") return { name: "settings" };
   return { name: "accounts" };
 }
@@ -139,6 +146,11 @@ function formatMoney(amount, currency = settings.defaultCurrency) {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   })}`;
+}
+
+function formatSignedMoney(amount, currency = settings.defaultCurrency) {
+  const n = Number(amount) || 0;
+  return n < 0 ? `-${formatMoney(n, currency)}` : formatMoney(n, currency);
 }
 
 function typeIcon(id) {
@@ -208,6 +220,36 @@ function toDefault(amount, currency) {
 function rateOf(currency) {
   const rates = settings.rates || DEFAULT_SETTINGS.rates;
   return Number(rates[currency]) || 1;
+}
+
+function foreignPerJpy(code) {
+  const n = rateOf(code);
+  return n > 0 ? 1 / n : 0;
+}
+
+function formatRateValue(n) {
+  const x = Number(n);
+  if (!x) return "";
+  return String(Number(x.toFixed(x >= 1 ? 4 : 8)));
+}
+
+function applyRateField(id) {
+  const usd = Number(app.querySelector("#rateUSD")?.value);
+  const php = Number(app.querySelector("#ratePHP")?.value);
+  const jpyUsd = Number(app.querySelector("#rateJPYUSD")?.value);
+  const jpyPhp = Number(app.querySelector("#rateJPYPHP")?.value);
+  if (id === "rateUSD" && usd > 0) settings.rates.USD = usd;
+  if (id === "ratePHP" && php > 0) settings.rates.PHP = php;
+  if (id === "rateJPYUSD" && jpyUsd > 0) settings.rates.USD = 1 / jpyUsd;
+  if (id === "rateJPYPHP" && jpyPhp > 0) settings.rates.PHP = 1 / jpyPhp;
+  const usdEl = app.querySelector("#rateUSD");
+  const phpEl = app.querySelector("#ratePHP");
+  const jpyUsdEl = app.querySelector("#rateJPYUSD");
+  const jpyPhpEl = app.querySelector("#rateJPYPHP");
+  if (id !== "rateUSD" && usdEl) usdEl.value = formatRateValue(settings.rates.USD);
+  if (id !== "ratePHP" && phpEl) phpEl.value = formatRateValue(settings.rates.PHP);
+  if (id !== "rateJPYUSD" && jpyUsdEl) jpyUsdEl.value = formatRateValue(foreignPerJpy("USD"));
+  if (id !== "rateJPYPHP" && jpyPhpEl) jpyPhpEl.value = formatRateValue(foreignPerJpy("PHP"));
 }
 
 function convertAmount(amount, fromCurrency, toCurrency) {
@@ -392,8 +434,7 @@ function groupSum(rows, kind) {
 function tabbar(active) {
   const items = [
     ["#/", "Accounts", "accounts"],
-    ["#/activity", "Activity", "activity"],
-    ["#/report", "Report", "report"],
+    ["#/banks", "Balance", "banks"],
     ["#/settings", "Settings", "settings"],
   ];
   return `<nav class="tabbar">${items
@@ -648,6 +689,135 @@ async function renderAccounts() {
   );
 }
 
+function ordinalDay(day) {
+  const n = Number(day) || 0;
+  const rem = n % 100;
+  if (rem >= 11 && rem <= 13) return `${n}th`;
+  return `${n}${["th", "st", "nd", "rd"][n % 10] || "th"}`;
+}
+
+function fundingRows(now = new Date()) {
+  return bankFunding({
+    assets: cache.assets,
+    autoDebits: settings.autoDebits,
+    now,
+    dueAmount,
+    convertToDefault: toDefault,
+    lowMargin: settings.lowMargin,
+  });
+}
+
+function fundingStatusText(row) {
+  if (row.status.id === "insufficient") {
+    return `${row.status.icon} Need Deposit: ${formatMoney(Math.abs(row.available))}`;
+  }
+  if (row.status.id === "low") return `${row.status.icon} Low Margin`;
+  return `${row.status.icon} Sufficient`;
+}
+
+async function renderBankBalance() {
+  const now = new Date();
+  const rows = fundingRows(now);
+  const totals = rows.reduce(
+    (acc, row) => {
+      acc.current += row.current;
+      acc.upcoming += row.upcoming;
+      acc.available += row.available;
+      return acc;
+    },
+    { current: 0, upcoming: 0, available: 0 }
+  );
+  app.innerHTML = shell(
+    "banks",
+    `
+    <header class="top">
+      <div>
+        <p class="eyebrow">Remaining auto-debits this month</p>
+        <h1>Bank Balance</h1>
+      </div>
+    </header>
+    <section class="hero">
+      <div class="hero-split three">
+        <div>
+          <span>Bank balances</span>
+          <strong class="amount in">${formatMoney(totals.current)}</strong>
+        </div>
+        <div>
+          <span>Upcoming</span>
+          <strong class="amount out">${formatMoney(totals.upcoming)}</strong>
+        </div>
+        <div>
+          <span>Available</span>
+          <strong class="amount ${totals.available < 0 ? "out" : "in"}">${formatSignedMoney(totals.available)}</strong>
+        </div>
+      </div>
+      <p class="hint">Available = current bank balance − upcoming scheduled debits through the rest of this month.</p>
+    </section>
+    <div class="fund-table-wrap">
+      <table class="fund-table">
+        <thead>
+          <tr>
+            <th>Bank</th>
+            <th>Current</th>
+            <th>Upcoming</th>
+            <th>Available</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows
+            .map(
+              (row) => `<tr>
+            <td>${escapeHtml(row.bank.label)}</td>
+            <td>${formatMoney(row.current)}</td>
+            <td>${formatMoney(row.upcoming)}</td>
+            <td class="${row.available < 0 ? "out" : ""}">${formatSignedMoney(row.available)}</td>
+          </tr>`
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+    ${rows
+      .map((row) => {
+        const href = row.account ? `#/account/${row.account.id}` : "#/settings";
+        return `<section class="card funding-card status-${row.status.id}">
+          <button class="funding-head" data-go="${href}" type="button">
+            <div>
+              <h2>${escapeHtml(row.bank.label)}</h2>
+              <p class="hint">${
+                row.account
+                  ? escapeHtml(row.account.name)
+                  : `No matching ${escapeHtml(row.bank.label)} account yet`
+              }</p>
+            </div>
+            <strong class="amount ${row.available < 0 ? "out" : "in"}">${formatSignedMoney(row.available)}</strong>
+          </button>
+          <p class="funding-status">${fundingStatusText(row)}</p>
+          <dl class="funding-stats">
+            <div><dt>Current Balance</dt><dd>${formatMoney(row.current)}</dd></div>
+            <div><dt>Upcoming Debits</dt><dd>${formatMoney(row.upcoming)}</dd></div>
+            <div><dt>Available Balance</dt><dd class="${row.available < 0 ? "out" : ""}">${formatSignedMoney(row.available)}</dd></div>
+          </dl>
+          ${
+            row.items.length
+              ? `<ul class="debit-list">${row.items
+                  .map(
+                    (item) => `<li>
+                  <span>${escapeHtml(item.payor)} · ${ordinalDay(item.debitDayActual)}</span>
+                  <strong>${item.resolvedAmount ? formatMoney(item.resolvedAmount) : "Set amount"}</strong>
+                </li>`
+                  )
+                  .join("")}</ul>`
+              : `<p class="hint">No remaining auto-debits after today.</p>`
+          }
+        </section>`;
+      })
+      .join("")}
+    <p class="hint">Amounts of 0 use the matching card, loan, or insurance balance. Set an amount in Settings to override.</p>
+  `
+  );
+}
+
 async function renderAccount(id) {
   let row;
   try {
@@ -793,10 +963,10 @@ async function renderTxForm(id, accountId) {
   const row = id ? await getTransaction(id) : null;
   const kind = row ? txKind(row) : "payment";
   const lockedAccount = accountId || row?.assetId || "";
-  const back = accountId ? `#/account/${accountId}` : "#/activity";
+  const back = accountId ? `#/account/${accountId}` : "#/";
   const cats = kind === "deposit" || kind === "adjust" ? settings.incomeCategories : settings.expenseCategories;
   app.innerHTML = shell(
-    accountId ? "accounts" : "activity",
+    "accounts",
     `
     <div class="form-top">
       <button class="ghost" data-go="${back}">Back</button>
@@ -912,6 +1082,7 @@ async function renderSettings() {
     "settings:appearance",
     "settings:currency",
     "settings:backup",
+    "settings:debits",
     "settings:accounts",
     "settings:expense",
     "settings:income",
@@ -947,12 +1118,21 @@ async function renderSettings() {
       </label>
       <div class="row" style="margin-top:10px">
         <label>USD → JPY
-          ${clearable(`<input id="rateUSD" type="number" step="any" value="${escapeAttr(settings.rates.USD)}" />`)}
+          ${clearable(`<input id="rateUSD" type="number" step="any" value="${escapeAttr(formatRateValue(settings.rates.USD))}" />`)}
         </label>
         <label>PHP → JPY
-          ${clearable(`<input id="ratePHP" type="number" step="any" value="${escapeAttr(settings.rates.PHP)}" />`)}
+          ${clearable(`<input id="ratePHP" type="number" step="any" value="${escapeAttr(formatRateValue(settings.rates.PHP))}" />`)}
         </label>
       </div>
+      <div class="row" style="margin-top:10px">
+        <label>JPY → USD
+          ${clearable(`<input id="rateJPYUSD" type="number" step="any" value="${escapeAttr(formatRateValue(foreignPerJpy("USD")))}" />`)}
+        </label>
+        <label>JPY → PHP
+          ${clearable(`<input id="rateJPYPHP" type="number" step="any" value="${escapeAttr(formatRateValue(foreignPerJpy("PHP")))}" />`)}
+        </label>
+      </div>
+      <p class="hint">USD → JPY is yen per dollar. JPY → USD is dollars per yen. Same pairing for PHP.</p>
       <p class="rate-status">${settings.ratesError || `Rates from ${escapeHtml(settings.ratesSource || "default")} · ${rateAge}`}</p>
       <div class="footer-links">
         <button class="ghost" id="refreshRates" type="button">Refresh rates now</button>
@@ -967,6 +1147,60 @@ async function renderSettings() {
         <button class="ghost" id="saveLocalBackup" type="button">Save local backup</button>
         <button class="ghost" id="backupBtn" type="button">Export backup</button>
         <label class="file-btn ghost">Import backup<input id="importFile" type="file" accept="application/json" /></label>
+      </div>`
+    )}
+    ${fold(
+      "settings:debits",
+      "Auto-debits",
+      `<p class="hint">These recurring withdrawals are matched to bank accounts by name. Amount 0 uses the matching card, loan, or insurance balance due.</p>
+      <label>Low margin warning (JPY)
+        ${clearable(`<input id="lowMargin" type="number" min="0" step="1000" value="${escapeAttr(settings.lowMargin)}" />`)}
+      </label>
+      <div class="list" style="margin-top:10px">
+        ${(settings.autoDebits || [])
+          .map((row) => {
+            const locked = DEFAULT_AUTO_DEBITS.some((item) => item.id === row.id);
+            return `<div class="debit-edit">
+              <label class="debit-enable">
+                <input type="checkbox" data-debit-id="${escapeAttr(row.id)}" data-debit-field="enabled" ${row.enabled !== false ? "checked" : ""} />
+                <strong>${escapeHtml(row.id)}</strong>
+              </label>
+              ${clearable(`<input data-debit-id="${escapeAttr(row.id)}" data-debit-field="payor" value="${escapeAttr(row.payor)}" />`)}
+              <div class="row">
+                <label>Bank
+                  <select data-debit-id="${escapeAttr(row.id)}" data-debit-field="bankId">
+                    ${BANKS.map((bank) => `<option value="${bank.id}" ${row.bankId === bank.id ? "selected" : ""}>${escapeHtml(bank.label)}</option>`).join("")}
+                  </select>
+                </label>
+                <label>Day
+                  <input data-debit-id="${escapeAttr(row.id)}" data-debit-field="debitDay" type="number" min="1" max="31" value="${escapeAttr(row.debitDay)}" />
+                </label>
+              </div>
+              <label>Amount (0 = use account due)
+                ${clearable(`<input data-debit-id="${escapeAttr(row.id)}" data-debit-field="amount" type="number" min="0" step="any" value="${escapeAttr(row.amount || 0)}" />`)}
+              </label>
+              ${locked ? "" : `<button class="danger compact" data-del-debit="${escapeAttr(row.id)}" type="button">Remove</button>`}
+            </div>`;
+          })
+          .join("")}
+      </div>
+      <div class="debit-add">
+        <p class="hint">Add another recurring debit</p>
+        ${clearable(`<input id="newDebitPayor" placeholder="Payor name" />`)}
+        <div class="row">
+          <label>Bank
+            <select id="newDebitBank">
+              ${BANKS.map((bank) => `<option value="${bank.id}">${escapeHtml(bank.label)}</option>`).join("")}
+            </select>
+          </label>
+          <label>Day
+            <input id="newDebitDay" type="number" min="1" max="31" value="27" />
+          </label>
+        </div>
+        <label>Amount
+          ${clearable(`<input id="newDebitAmount" type="number" min="0" step="any" value="0" />`)}
+        </label>
+        <button class="chip" id="addDebit" type="button">Add auto-debit</button>
       </div>`
     )}
     ${fold(
@@ -1214,11 +1448,13 @@ async function refreshRates({ force = false } = {}) {
 async function route() {
   try {
     const r = parseRoute();
+    if (r.name === "banks" && /^#\/(activity|report)\/?$/.test(location.hash || "")) {
+      history.replaceState(null, "", "#/banks");
+    }
     if (r.name === "account") return await renderAccount(r.id);
     if (r.name === "account-form") return await renderAccountForm(r.id);
-    if (r.name === "activity") return await renderActivity();
+    if (r.name === "banks") return await renderBankBalance();
     if (r.name === "tx-form") return await renderTxForm(r.id, r.accountId);
-    if (r.name === "report") return await renderReport();
     if (r.name === "settings") return await renderSettings();
     return await renderAccounts();
   } catch (err) {
@@ -1272,6 +1508,31 @@ app.addEventListener("click", async (e) => {
   }
   if (e.target.id === "saveLocalBackup") {
     await saveAutoBackup({ force: true });
+    renderSettings();
+    return;
+  }
+  if (e.target.id === "addDebit") {
+    const payor = app.querySelector("#newDebitPayor")?.value.trim();
+    if (!payor) return;
+    settings.autoDebits = settings.autoDebits || [];
+    settings.autoDebits.push(
+      normalizeDebit({
+        id: `U-${uid().slice(0, 8)}`,
+        payor,
+        bankId: app.querySelector("#newDebitBank")?.value || BANKS[0].id,
+        debitDay: clampDay(app.querySelector("#newDebitDay")?.value),
+        amount: Number(app.querySelector("#newDebitAmount")?.value) || 0,
+        enabled: true,
+      })
+    );
+    await persistSettings();
+    renderSettings();
+    return;
+  }
+  const delDebit = e.target.closest("[data-del-debit]")?.dataset.delDebit;
+  if (delDebit) {
+    settings.autoDebits = (settings.autoDebits || []).filter((row) => row.id !== delDebit);
+    await persistSettings();
     renderSettings();
     return;
   }
@@ -1341,7 +1602,7 @@ app.addEventListener("click", async (e) => {
     const row = await getTransaction(routeNow.id);
     if (row?.effect?.changes) await applyChanges(row.effect.changes.map((c) => ({ id: c.id, delta: -c.delta })));
     await deleteTransaction(routeNow.id);
-    await afterSave(routeNow.accountId ? `#/account/${routeNow.accountId}` : "#/activity");
+    await afterSave(routeNow.accountId ? `#/account/${routeNow.accountId}` : "#/");
     return;
   }
   if (e.target.id === "backupBtn") {
@@ -1394,9 +1655,25 @@ app.addEventListener("change", async (e) => {
     renderSettings();
     return;
   }
-  if (e.target.id === "rateUSD" || e.target.id === "ratePHP") {
-    settings.rates.USD = Number(app.querySelector("#rateUSD").value) || settings.rates.USD;
-    settings.rates.PHP = Number(app.querySelector("#ratePHP").value) || settings.rates.PHP;
+  if (e.target.id === "rateUSD" || e.target.id === "ratePHP" || e.target.id === "rateJPYUSD" || e.target.id === "rateJPYPHP") {
+    applyRateField(e.target.id);
+    await persistSettings();
+    return;
+  }
+  if (e.target.id === "lowMargin") {
+    settings.lowMargin = Math.max(0, Number(e.target.value) || 0);
+    await persistSettings();
+    return;
+  }
+  if (e.target.dataset.debitField) {
+    const row = (settings.autoDebits || []).find((item) => item.id === e.target.dataset.debitId);
+    if (!row) return;
+    const field = e.target.dataset.debitField;
+    if (field === "enabled") row.enabled = e.target.checked;
+    else if (field === "debitDay") row.debitDay = clampDay(e.target.value);
+    else if (field === "amount") row.amount = Math.max(0, Number(e.target.value) || 0);
+    else if (field === "bankId") row.bankId = e.target.value;
+    else if (field === "payor") row.payor = e.target.value.trim() || row.payor;
     await persistSettings();
     return;
   }
@@ -1493,7 +1770,7 @@ app.addEventListener("submit", async (e) => {
       updatedAt: new Date().toISOString(),
     });
     const accountId = e.target.dataset.accountId || data.assetId;
-    await afterSave(accountId ? `#/account/${accountId}` : "#/activity");
+    await afterSave(accountId ? `#/account/${accountId}` : "#/");
   }
 });
 

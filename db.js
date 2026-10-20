@@ -1,3 +1,5 @@
+import { DEFAULT_AUTO_DEBITS, DEFAULT_LOW_MARGIN, mergeAutoDebits } from "./debits.js";
+
 const DB_NAME = "bochog-kakei";
 const DB_VERSION = 1;
 
@@ -46,6 +48,8 @@ export const DEFAULT_SETTINGS = {
   ratesUpdatedAt: "",
   ratesSource: "default",
   collapsedGroups: {},
+  autoDebits: DEFAULT_AUTO_DEBITS,
+  lowMargin: DEFAULT_LOW_MARGIN,
 };
 
 let dbPromise = null;
@@ -226,7 +230,12 @@ function mergeCategories(saved, defaults) {
 
 export async function getSettings() {
   const row = await one("settings", "app");
-  if (!row) return { ...DEFAULT_SETTINGS };
+  if (!row) {
+    return {
+      ...DEFAULT_SETTINGS,
+      autoDebits: mergeAutoDebits([], DEFAULT_AUTO_DEBITS),
+    };
+  }
   return {
     ...DEFAULT_SETTINGS,
     ...row,
@@ -235,6 +244,8 @@ export async function getSettings() {
     expenseCategories: mergeCategories(row.expenseCategories, DEFAULT_SETTINGS.expenseCategories),
     assetCategories: DEFAULT_SETTINGS.assetCategories,
     collapsedGroups: { ...DEFAULT_SETTINGS.collapsedGroups, ...(row.collapsedGroups || {}) },
+    autoDebits: mergeAutoDebits(row.autoDebits, DEFAULT_AUTO_DEBITS),
+    lowMargin: Number(row.lowMargin) >= 0 ? Number(row.lowMargin) : DEFAULT_LOW_MARGIN,
   };
 }
 

@@ -1,10 +1,11 @@
-const CACHE = "bochog-kakei-v14";
+const CACHE = "bochog-kakei-v16";
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=14",
-  "./app.js?v=14",
+  "./styles.css?v=16",
+  "./app.js?v=16",
   "./db.js",
+  "./debits.js",
   "./export.js",
   "./manifest.webmanifest",
   "./icons/icon.svg",

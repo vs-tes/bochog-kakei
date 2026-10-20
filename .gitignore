@@ -1,5 +1,6 @@
 .DS_Store
 *.log
+backup/
 .vscode/
 .idea/
 node_modules/

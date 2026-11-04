@@ -1,4 +1,5 @@
 export const DEFAULT_LOW_MARGIN = 30000;
+export const UPCOMING_WINDOW_DAYS = 7;
 
 export const BANKS = [
   { id: "mizuho", label: "Mizuho", aliases: ["mizuho", "みずほ"] },
@@ -65,6 +66,25 @@ export function debitDayThisMonth(debitDay, date = new Date()) {
 
 export function isUpcomingDebit(debitDay, date = new Date()) {
   return debitDayThisMonth(debitDay, date) >= date.getDate();
+}
+
+function startOfDay(date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+export function nextDebitDate(debitDay, date = new Date()) {
+  const today = startOfDay(date);
+  const thisMonth = new Date(today.getFullYear(), today.getMonth(), debitDayThisMonth(debitDay, today));
+  if (thisMonth >= today) return thisMonth;
+  const nextMonthRef = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+  return new Date(nextMonthRef.getFullYear(), nextMonthRef.getMonth(), debitDayThisMonth(debitDay, nextMonthRef));
+}
+
+export function isDueWithinDays(debitDay, date = new Date(), days = UPCOMING_WINDOW_DAYS) {
+  const today = startOfDay(date);
+  const end = new Date(today.getFullYear(), today.getMonth(), today.getDate() + days);
+  const due = nextDebitDate(debitDay, today);
+  return due >= today && due <= end;
 }
 
 function normalizeName(value) {
@@ -139,22 +159,26 @@ export function bankFunding({
   dueAmount,
   convertToDefault,
   lowMargin = DEFAULT_LOW_MARGIN,
+  windowDays = UPCOMING_WINDOW_DAYS,
 }) {
   return banks.map((bank) => {
     const account = findBankAccount(assets, bank);
     const current = account ? convertToDefault(dueAmount(account), account.currency) : 0;
     const items = (autoDebits || [])
-      .filter((row) => row.enabled !== false && row.bankId === bank.id && isUpcomingDebit(row.debitDay, now))
+      .filter((row) => row.enabled !== false && row.bankId === bank.id && isDueWithinDays(row.debitDay, now, windowDays))
       .map((row) => {
         const amount = resolveDebitAmount(row, assets, dueAmount, convertToDefault);
         const source = Number(row.amount) > 0 ? null : findPayorAccount(assets, row);
+        const dueDate = nextDebitDate(row.debitDay, now);
         return {
           ...row,
           resolvedAmount: amount,
           sourceAccount: source,
-          debitDayActual: debitDayThisMonth(row.debitDay, now),
+          dueDate,
+          debitDayActual: dueDate.getDate(),
         };
-      });
+      })
+      .sort((a, b) => a.dueDate - b.dueDate);
     const upcoming = items.reduce((sum, row) => sum + row.resolvedAmount, 0);
     const available = current - upcoming;
     return {

@@ -21,6 +21,7 @@ import { downloadFile, printReport, toCsv, toExcelXml } from "./export.js";
 import {
   BANKS,
   DEFAULT_AUTO_DEBITS,
+  UPCOMING_WINDOW_DAYS,
   bankFunding,
   clampDay,
   normalizeDebit,
@@ -689,11 +690,8 @@ async function renderAccounts() {
   );
 }
 
-function ordinalDay(day) {
-  const n = Number(day) || 0;
-  const rem = n % 100;
-  if (rem >= 11 && rem <= 13) return `${n}th`;
-  return `${n}${["th", "st", "nd", "rd"][n % 10] || "th"}`;
+function formatDueDate(date) {
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 function fundingRows(now = new Date()) {
@@ -732,7 +730,7 @@ async function renderBankBalance() {
     `
     <header class="top">
       <div>
-        <p class="eyebrow">Remaining auto-debits this month</p>
+        <p class="eyebrow">Auto-debits due in the next ${UPCOMING_WINDOW_DAYS} days</p>
         <h1>Bank Balance</h1>
       </div>
     </header>
@@ -751,7 +749,8 @@ async function renderBankBalance() {
           <strong class="amount ${totals.available < 0 ? "out" : "in"}">${formatSignedMoney(totals.available)}</strong>
         </div>
       </div>
-      <p class="hint">Available = current bank balance − upcoming scheduled debits through the rest of this month.</p>
+      <p class="hint">Showing obligations due within the next ${UPCOMING_WINDOW_DAYS} days (${formatDueDate(now)} – ${formatDueDate(new Date(now.getFullYear(), now.getMonth(), now.getDate() + UPCOMING_WINDOW_DAYS))}).</p>
+      <p class="hint">Available = current bank balance − upcoming debits due within the next ${UPCOMING_WINDOW_DAYS} days.</p>
     </section>
     <div class="fund-table-wrap">
       <table class="fund-table">
@@ -803,12 +802,12 @@ async function renderBankBalance() {
               ? `<ul class="debit-list">${row.items
                   .map(
                     (item) => `<li>
-                  <span>${escapeHtml(item.payor)} · ${ordinalDay(item.debitDayActual)}</span>
+                  <span>${escapeHtml(item.payor)} · ${formatDueDate(item.dueDate)}</span>
                   <strong>${item.resolvedAmount ? formatMoney(item.resolvedAmount) : "Set amount"}</strong>
                 </li>`
                   )
                   .join("")}</ul>`
-              : `<p class="hint">No remaining auto-debits after today.</p>`
+              : `<p class="hint">No auto-debits due in the next ${UPCOMING_WINDOW_DAYS} days.</p>`
           }
         </section>`;
       })
@@ -899,7 +898,7 @@ async function renderAccountForm(id) {
         </select>
       </label>
       <label id="balanceLabel">${isAmountDueType(selectedType) ? "Initial amount due" : "Initial balance"}
-        ${clearable(`<input name="initialBalance" type="number" step="any" required value="${escapeAttr(openingBalance(row))}" />`)}
+        ${clearable(`<input name="initialBalance" type="number" inputmode="decimal" step="any" required value="${escapeAttr(openingBalance(row))}" />`)}
       </label>
       <p class="fx-hint" id="fxHint"></p>
       <p class="hint">The balance shown on the account is this amount plus every transaction.</p>
@@ -987,7 +986,7 @@ async function renderTxForm(id, accountId) {
         ${clearable(`<input name="name" value="${escapeAttr(row?.name || "")}" placeholder="Electric bill, salary, card payment…" />`)}
       </label>
       <label>Amount
-        ${clearable(`<input name="amount" type="number" step="any" required value="${escapeAttr(row?.amount ?? "")}" />`)}
+        ${clearable(`<input name="amount" type="number" inputmode="decimal" step="any" required value="${escapeAttr(row?.amount ?? "")}" />`)}
       </label>
       <p class="fx-hint" id="fxHint"></p>
       <div class="row">
@@ -1118,18 +1117,18 @@ async function renderSettings() {
       </label>
       <div class="row" style="margin-top:10px">
         <label>USD → JPY
-          ${clearable(`<input id="rateUSD" type="number" step="any" value="${escapeAttr(formatRateValue(settings.rates.USD))}" />`)}
+          ${clearable(`<input id="rateUSD" type="number" inputmode="decimal" step="any" value="${escapeAttr(formatRateValue(settings.rates.USD))}" />`)}
         </label>
         <label>PHP → JPY
-          ${clearable(`<input id="ratePHP" type="number" step="any" value="${escapeAttr(formatRateValue(settings.rates.PHP))}" />`)}
+          ${clearable(`<input id="ratePHP" type="number" inputmode="decimal" step="any" value="${escapeAttr(formatRateValue(settings.rates.PHP))}" />`)}
         </label>
       </div>
       <div class="row" style="margin-top:10px">
         <label>JPY → USD
-          ${clearable(`<input id="rateJPYUSD" type="number" step="any" value="${escapeAttr(formatRateValue(foreignPerJpy("USD")))}" />`)}
+          ${clearable(`<input id="rateJPYUSD" type="number" inputmode="decimal" step="any" value="${escapeAttr(formatRateValue(foreignPerJpy("USD")))}" />`)}
         </label>
         <label>JPY → PHP
-          ${clearable(`<input id="rateJPYPHP" type="number" step="any" value="${escapeAttr(formatRateValue(foreignPerJpy("PHP")))}" />`)}
+          ${clearable(`<input id="rateJPYPHP" type="number" inputmode="decimal" step="any" value="${escapeAttr(formatRateValue(foreignPerJpy("PHP")))}" />`)}
         </label>
       </div>
       <p class="hint">USD → JPY is yen per dollar. JPY → USD is dollars per yen. Same pairing for PHP.</p>
@@ -1154,7 +1153,7 @@ async function renderSettings() {
       "Auto-debits",
       `<p class="hint">These recurring withdrawals are matched to bank accounts by name. Amount 0 uses the matching card, loan, or insurance balance due.</p>
       <label>Low margin warning (JPY)
-        ${clearable(`<input id="lowMargin" type="number" min="0" step="1000" value="${escapeAttr(settings.lowMargin)}" />`)}
+        ${clearable(`<input id="lowMargin" type="number" inputmode="numeric" pattern="[0-9]*" min="0" step="1000" value="${escapeAttr(settings.lowMargin)}" />`)}
       </label>
       <div class="list" style="margin-top:10px">
         ${(settings.autoDebits || [])
@@ -1173,11 +1172,11 @@ async function renderSettings() {
                   </select>
                 </label>
                 <label>Day
-                  <input data-debit-id="${escapeAttr(row.id)}" data-debit-field="debitDay" type="number" min="1" max="31" value="${escapeAttr(row.debitDay)}" />
+                  <input data-debit-id="${escapeAttr(row.id)}" data-debit-field="debitDay" type="number" inputmode="numeric" pattern="[0-9]*" min="1" max="31" value="${escapeAttr(row.debitDay)}" />
                 </label>
               </div>
               <label>Amount (0 = use account due)
-                ${clearable(`<input data-debit-id="${escapeAttr(row.id)}" data-debit-field="amount" type="number" min="0" step="any" value="${escapeAttr(row.amount || 0)}" />`)}
+                ${clearable(`<input data-debit-id="${escapeAttr(row.id)}" data-debit-field="amount" type="number" inputmode="decimal" min="0" step="any" value="${escapeAttr(row.amount || 0)}" />`)}
               </label>
               ${locked ? "" : `<button class="danger compact" data-del-debit="${escapeAttr(row.id)}" type="button">Remove</button>`}
             </div>`;
@@ -1194,11 +1193,11 @@ async function renderSettings() {
             </select>
           </label>
           <label>Day
-            <input id="newDebitDay" type="number" min="1" max="31" value="27" />
+            <input id="newDebitDay" type="number" inputmode="numeric" pattern="[0-9]*" min="1" max="31" value="27" />
           </label>
         </div>
         <label>Amount
-          ${clearable(`<input id="newDebitAmount" type="number" min="0" step="any" value="0" />`)}
+          ${clearable(`<input id="newDebitAmount" type="number" inputmode="decimal" min="0" step="any" value="0" />`)}
         </label>
         <button class="chip" id="addDebit" type="button">Add auto-debit</button>
       </div>`

@@ -26,18 +26,6 @@ import {
   clampDay,
   normalizeDebit,
 } from "./debits.js";
-import {
-  changePassword,
-  clearSyncSession,
-  isSyncEnabled,
-  loadSyncConfig,
-  login,
-  rememberDelete,
-  runKakeiSync,
-  saveSyncConfig,
-  suggestedServerUrl,
-} from "./cloud-sync.js";
-
 const app = document.getElementById("app");
 const TX_TYPES = [
   { id: "payment", label: "Payment", sign: "−" },
@@ -1088,10 +1076,7 @@ function reportRows() {
 async function renderSettings() {
   const auto = await latestAutoBackup();
   const rateAge = settings.ratesUpdatedAt ? prettyDate(settings.ratesUpdatedAt.slice(0, 10)) : "not yet";
-  const syncCfg = loadSyncConfig();
-  const syncServerValue = syncCfg.serverUrl || suggestedServerUrl();
   const settingKeys = [
-    "settings:sync",
     "settings:appearance",
     "settings:currency",
     "settings:backup",
@@ -1105,56 +1090,11 @@ async function renderSettings() {
     `
     <header class="top">
       <div>
-        <p class="eyebrow">${isSyncEnabled() ? "Synced across your devices" : "This device, or cloud sync"}</p>
+        <p class="eyebrow">This device · share via backup</p>
         <h1>Settings</h1>
       </div>
     </header>
     ${collapseControls(settingKeys)}
-    ${fold(
-      "settings:sync",
-      "Cloud sync",
-      isSyncEnabled()
-        ? `<p class="hint">Synced with the household account on every device that uses the same Oracle URL.</p>
-      <p class="rate-status" id="syncStatus">Signed in as ${escapeHtml(syncCfg.username || "")}${
-          syncCfg.lastSyncAt
-            ? ` · last sync ${escapeHtml(syncCfg.lastSyncAt.slice(0, 19).replace("T", " "))} UTC`
-            : ""
-        }</p>
-      <label>Server URL
-        ${clearable(`<input id="syncServer" type="url" placeholder="https://140.238.58.1" value="${escapeAttr(syncServerValue)}" />`)}
-      </label>
-      <div class="footer-links">
-        <button class="primary" id="syncNowBtn" type="button">Sync now</button>
-        <button class="ghost" id="syncLogoutBtn" type="button">Sign out</button>
-      </div>
-      <h3 style="margin:18px 0 8px;font-size:1rem">Change password</h3>
-      <p class="hint">Updates the household sync password on the server. You stay signed in on this device.</p>
-      <label>Current password
-        ${clearable(`<input id="syncCurrentPass" type="password" autocomplete="current-password" />`)}
-      </label>
-      <label style="margin-top:10px">New password
-        ${clearable(`<input id="syncNewPass" type="password" autocomplete="new-password" />`)}
-      </label>
-      <div class="footer-links">
-        <button class="ghost" id="syncChangePassBtn" type="button">Save new password</button>
-      </div>`
-        : `<p class="hint">Use the Oracle URLs on every device (Mac and iPhone). Sign in with the same household account.</p>
-      <label>Server URL
-        ${clearable(`<input id="syncServer" type="url" placeholder="https://140.238.58.1" value="${escapeAttr(syncServerValue)}" />`)}
-      </label>
-      <div class="row" style="margin-top:10px">
-        <label>Username
-          ${clearable(`<input id="syncUser" autocomplete="username" value="${escapeAttr(syncCfg.username || "bochog")}" />`)}
-        </label>
-        <label>Password
-          ${clearable(`<input id="syncPass" type="password" autocomplete="current-password" />`)}
-        </label>
-      </div>
-      <p class="rate-status" id="syncStatus">Not signed in</p>
-      <div class="footer-links">
-        <button class="primary" id="syncLoginBtn" type="button">Sign in</button>
-      </div>`
-    )}
     ${fold(
       "settings:appearance",
       "Appearance",
@@ -1199,7 +1139,7 @@ async function renderSettings() {
     ${fold(
       "settings:backup",
       "Backup",
-      `<p class="hint">Changes save on this device as you go. Nothing is uploaded. When you are done with a batch of updates, export a copy — that is the only sync.</p>
+      `<p class="hint">Changes save on this device. To use another phone or Mac, Export backup here, share the file (AirDrop / iCloud Drive), then Import on the other device.</p>
       <p class="rate-status">${auto?.createdAt ? `Last local backup: ${prettyDate(auto.createdAt.slice(0, 10))}` : "No local backup yet."}</p>
       <div class="footer-links">
         <button class="ghost" id="saveLocalBackup" type="button">Save local backup</button>
@@ -1564,53 +1504,6 @@ app.addEventListener("click", async (e) => {
     renderSettings();
     return;
   }
-  if (e.target.id === "syncLoginBtn") {
-    const serverUrl = app.querySelector("#syncServer")?.value.trim() || suggestedServerUrl();
-    const username = app.querySelector("#syncUser")?.value.trim() || "";
-    const password = app.querySelector("#syncPass")?.value || "";
-    try {
-      if (serverUrl) saveSyncConfig({ serverUrl });
-      await login(username, password, serverUrl);
-      await runKakeiSync();
-      await reload();
-      alert("Signed in and synced.");
-    } catch (err) {
-      alert(err.message || String(err));
-    }
-    renderSettings();
-    return;
-  }
-  if (e.target.id === "syncNowBtn") {
-    try {
-      const serverUrl = app.querySelector("#syncServer")?.value.trim() || suggestedServerUrl();
-      if (serverUrl) saveSyncConfig({ serverUrl });
-      await runKakeiSync();
-      await reload();
-      alert("Sync finished.");
-    } catch (err) {
-      alert(err.message || String(err));
-    }
-    renderSettings();
-    return;
-  }
-  if (e.target.id === "syncChangePassBtn") {
-    const currentPassword = app.querySelector("#syncCurrentPass")?.value || "";
-    const newPassword = app.querySelector("#syncNewPass")?.value || "";
-    try {
-      const result = await changePassword(currentPassword, newPassword);
-      if (result?.token) saveSyncConfig({ token: result.token, enabled: true });
-      alert("Password updated. Sign in again on your other devices with the new password.");
-    } catch (err) {
-      alert(err.message || String(err));
-    }
-    renderSettings();
-    return;
-  }
-  if (e.target.id === "syncLogoutBtn") {
-    clearSyncSession();
-    renderSettings();
-    return;
-  }
   if (e.target.id === "saveLocalBackup") {
     await saveAutoBackup({ force: true });
     renderSettings();
@@ -1697,7 +1590,6 @@ app.addEventListener("click", async (e) => {
   if (e.target.id === "deleteAccount") {
     if (!confirm("Delete this account?")) return;
     const id = parseRoute().id;
-    rememberDelete("assets", id);
     await deleteAsset(id);
     await afterSave("#/");
     return;
@@ -1707,7 +1599,6 @@ app.addEventListener("click", async (e) => {
     const routeNow = parseRoute();
     const row = await getTransaction(routeNow.id);
     if (row?.effect?.changes) await applyChanges(row.effect.changes.map((c) => ({ id: c.id, delta: -c.delta })));
-    rememberDelete("transactions", routeNow.id);
     await deleteTransaction(routeNow.id);
     await afterSave(routeNow.accountId ? `#/account/${routeNow.accountId}` : "#/");
     return;
@@ -1907,14 +1798,6 @@ async function boot() {
     return;
   }
   refreshRates().catch(() => {});
-  if (isSyncEnabled()) {
-    runKakeiSync()
-      .then(async () => {
-        await reload();
-        await route();
-      })
-      .catch((err) => console.warn("cloud sync skipped", err));
-  }
 }
 
 boot();

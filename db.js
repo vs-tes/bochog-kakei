@@ -250,7 +250,11 @@ export async function getSettings() {
 }
 
 export async function saveSettings(settings) {
-  return put("settings", { id: "app", ...settings });
+  return put("settings", {
+    id: "app",
+    ...settings,
+    updatedAt: settings.updatedAt || new Date().toISOString(),
+  });
 }
 
 function blobToDataUrl(blob) {

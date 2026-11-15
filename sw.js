@@ -1,15 +1,19 @@
-const CACHE = "bochog-kakei-v17";
+const CACHE = "bochog-kakei-v20";
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=17",
-  "./app.js?v=17",
+  "./styles.css?v=20",
+  "./app.js?v=20",
   "./db.js",
   "./debits.js",
   "./export.js",
+  "./sync-client.js",
+  "./cloud-sync.js",
   "./manifest.webmanifest",
+  "./apple-touch-icon.png",
   "./icons/icon.svg",
   "./icons/icon-180.png",
+  "./icons/icon-192.png",
   "./icons/icon-512.png",
 ];
 
@@ -30,35 +34,21 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   const url = new URL(event.request.url);
+  if (url.pathname.startsWith("/api/")) return;
   if (url.origin !== self.location.origin) return;
 
-  if (event.request.mode === "navigate") {
-    event.respondWith(
-      fetch(event.request)
-        .then((response) => {
-          if (response.ok) {
-            const copy = response.clone();
-            caches.open(CACHE).then((cache) => cache.put("./index.html", copy));
-          }
-          return response;
-        })
-        .catch(() => caches.match("./index.html"))
-    );
-    return;
-  }
-
+  // Network-first so Mac/iPhone always pick up sync fixes and data scripts.
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const networked = fetch(event.request)
-        .then((response) => {
-          if (response && response.ok && response.type === "basic") {
-            const copy = response.clone();
-            caches.open(CACHE).then((cache) => cache.put(event.request, copy));
-          }
-          return response;
-        })
-        .catch(() => cached);
-      return cached || networked;
-    })
+    fetch(event.request)
+      .then((response) => {
+        if (response && response.ok && response.type === "basic") {
+          const copy = response.clone();
+          caches.open(CACHE).then((cache) => cache.put(event.request, copy));
+        }
+        return response;
+      })
+      .catch(() =>
+        caches.match(event.request).then((cached) => cached || caches.match("./index.html"))
+      )
   );
 });
